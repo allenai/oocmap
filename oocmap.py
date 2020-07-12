@@ -1,5 +1,7 @@
 import codecs
+import random
 import struct
+from contextlib import contextmanager
 from hashlib import blake2s
 from os import PathLike
 from typing import *
@@ -41,6 +43,9 @@ def _hardcoded_encoding(v: Any) -> Optional[bytes]:
 def _hardcoded_decoding(b: bytes) -> Any:
     return _HARDCODED_VALUES_REVERSE[b]
 
+def _random_bytes(n: int) -> bytes:
+    return bytes(random.getrandbits(8) for _ in range(n))
+
 class OOCMap(object):
     def __init__(self, filename: Union[str, PathLike], *, max_size: int = 1024*1024*1024*1024):
         self.lmdb_env = lmdb.open(
@@ -74,24 +79,29 @@ class OOCMap(object):
             b"dicts",
             integerkey=True)
 
-        # We use a random salt to salt keys for mutable objects.
-        import random
-        self.salt = random.randrange(2**63)
-
         self.id_to_key = {}
+        self.ids_written_this_transaction = {}
+        self.transaction_count = 0
 
-    def _key_for_mutable_value(self, value: Any) -> bytes:
-        return (id(value) ^ self.salt).to_bytes(8, _BYTEORDER, signed=False)
+    def begin_transaction(self):
+        if self.transaction_count <= 0:
+            self.ids_written_this_transaction.clear()
+        self.transaction_count += 1
 
-    def _write_mutable_value_to_db(
-        self,
-        key: Union[bytes, bytearray],
-        encoded: Union[bytes, bytearray],
-        db
-    ) -> None:
-        assert len(key) == 8
-        with self.lmdb_env.begin(write=True, db=db) as txn:
-            txn.put(key, encoded)
+    def end_transaction(self):
+        if self.transaction_count <= 0:
+            raise ValueError("No transaction running.")
+        self.transaction_count -= 1
+        if self.transaction_count <= 0:
+            self.ids_written_this_transaction.clear()
+
+    @contextmanager
+    def transaction(self):
+        self.begin_transaction()
+        try:
+            yield self
+        finally:
+            self.end_transaction()
 
     def _write_immutable_value_to_db(
         self,
@@ -109,6 +119,11 @@ class OOCMap(object):
     def _encode(self, b: bytearray, v: Any, write_to_db: bool = True) -> None:
         """Encodes the value v into the bytearray b.
         This will always add exactly 9 bytes to b."""
+
+        already_written_encoding = self.ids_written_this_transaction.get(id(v))
+        if already_written_encoding is not None:
+            b.extend(already_written_encoding)
+            return
 
         length_before = len(b)
 
@@ -135,7 +150,7 @@ class OOCMap(object):
                 b.append(2)                                 # type code for longer ints
                 b.extend(h)
         elif isinstance(v, float):
-            b.append(3)                                     # type code for shorts
+            b.append(3)                                     # type code for floats
             b.extend(struct.pack("<d", v))
         elif isinstance(v, str):
             encoded = codecs.encode(v)
@@ -151,28 +166,38 @@ class OOCMap(object):
             encoded = bytearray()
             encoded.extend(struct.pack("<I", len(v)))
             for v2 in v:
-                self._encode(encoded, v2)
+                self._encode(encoded, v2, write_to_db)
             h = self._write_immutable_value_to_db(encoded, self.tuples_db, write_to_db)
             b.append(LazyTuple.TYPE_CODE)                   # type code for non-empty tuple
             b.extend(h)
         elif isinstance(v, list):
             if not write_to_db:
                 raise ValueError("Can't encode mutable values without writing to the db.")
+
+            # encode all the list items
+            v_encoded = []
+            for item in v:
+                item_encoded = bytearray()
+                self._encode(item_encoded, item, write_to_db)
+                v_encoded.append(bytes(item_encoded))
+
+            # Keys for list_db are half a unique identifier of the list, and half the index
+            # of the element.
             key = self.id_to_key.get(id(v))
-            if key is not None:
-                assert len(key) == 8
-                b.append(LazyList.TYPE_CODE)                # type code for list
-                b.extend(key)
-            else:
-                encoded = bytearray()
-                encoded.extend(struct.pack("<I", len(v)))
-                for v2 in v:
-                    self._encode(encoded, v2)
-                key = self._key_for_mutable_value(v)
-                self._write_mutable_value_to_db(key, encoded, self.lists_db)
-                self.id_to_key[id(v)] = key
-                b.append(LazyList.TYPE_CODE)                # type code for list
-                b.extend(key)
+            with self.lmdb_env.begin(write=True, db=self.lists_db) as txn:
+                if key is None:
+                    key = _random_bytes(4) + b"\xff\xff\xff\xff"
+                    while txn.get(key) is not None:
+                        key = _random_bytes(4) + b"\xff\xff\xff\xff"
+                txn.put(key, len(v).to_bytes(4, _BYTEORDER, signed=False))
+                for i, item_encoded in enumerate(v_encoded):
+                    item_key = key[:4] + i.to_bytes(4, _BYTEORDER, signed=False)
+                    txn.put(item_key, item_encoded)
+
+            self.id_to_key[id(v)] = key
+
+            b.append(LazyList.TYPE_CODE)                # type code for list
+            b.extend(key)
         elif isinstance(v, dict):
             if not write_to_db:
                 raise ValueError("Can't encode mutable values without writing to the db.")
@@ -248,22 +273,14 @@ class OOCMap(object):
     def __setitem__(self, key, value):
         # If the key has mutable elements in it, and those elements change,
         # the lookup will fail later.
+        with self.transaction():
+            encoded_key = bytearray()
+            self._encode(encoded_key, key)
+            encoded_value = bytearray()
+            self._encode(encoded_value, value)
 
-        # We clear this before we start inserting, because the next
-        # time we get called the mutable objects might have been mutated,
-        # and we need to make sure they get written out again.
-        self.id_to_key.clear()
-
-        encoded_key = bytearray()
-        self._encode(encoded_key, key)
-        encoded_value = bytearray()
-        self._encode(encoded_value, value)
-
-        with self.lmdb_env.begin(write=True, db=self.root_db) as txn:
-            txn.put(encoded_key, encoded_value)
-
-        # We clear it again just so we don't carry this dict around for no reason.
-        self.id_to_key.clear()
+            with self.lmdb_env.begin(write=True, db=self.root_db) as txn:
+                txn.put(encoded_key, encoded_value)
 
     def __getitem__(self, key):
         encoded_key = bytearray()
@@ -292,7 +309,7 @@ class _Lazy:
 
     def __init__(self, ooc: OOCMap, key: bytes):
         self.ooc = ooc
-        self.key = key
+        self.key = bytes(key)
 
     def __repr__(self):
         return f"{self.__class__.__name__}(...)"
@@ -365,6 +382,12 @@ class _Lazy:
 class LazyTuple(_Lazy):
     TYPE_CODE = 7
 
+    def __len__(self) -> int:
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
+            encoded = txn.get(self.key)
+            length = struct.unpack_from("<I", encoded)[0]
+            return length
+
     def __getitem__(self, index) -> Any:
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
             encoded = txn.get(self.key)
@@ -378,12 +401,6 @@ class LazyTuple(_Lazy):
                 4 + index * 9 + 9
             ]
             return self.ooc._decode(encoded)
-
-    def __len__(self) -> int:
-        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
-            encoded = txn.get(self.key)
-            length = struct.unpack_from("<I", encoded)[0]
-            return length
 
     def eager(self) -> Tuple:
         elements = []
@@ -442,7 +459,91 @@ class LazyTuple(_Lazy):
 
 
 class LazyList(_Lazy):
+    # TODO: implement more List methods
     TYPE_CODE = 9
+
+    def _key_for_index(self, index: int) -> bytes:
+        return self.key[:4] + index.to_bytes(4, _BYTEORDER, signed=False)
+
+    def __getitem__(self, index: int) -> Any:
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
+            length = len(self)
+            if index < length:
+                index = length - index
+            if index > length:
+                raise IndexError()
+            encoded = txn.get(self._key_for_index(index))
+            return self.ooc._decode(encoded)
+
+    def __setitem__(self, index: int, value):
+        encoded = bytearray()
+        self.ooc._encode(encoded, value)
+
+        with self.ooc.lmdb_env.begin(write=True, db=self.ooc.lists_db) as txn:
+            length = len(self)
+            if index < length:
+                index = length - index
+            if index > length:
+                raise IndexError()
+            txn.put(self._key_for_index(index), encoded)
+
+    def __len__(self) -> int:
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
+            encoded = txn.get(self.key)
+            length = struct.unpack("<I", encoded)[0]
+            return length
+
+    def eager(self) -> List:
+        elements = []
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
+            index = 0
+            while True:
+                encoded = txn.get(self._key_for_index(index))
+                if encoded is None:
+                    break
+                elements.append(self.ooc._decode(encoded))
+                index += 1
+        return elements
+
+    def __contains__(self, item) -> bool:
+        if isinstance(item, _Lazy) and id(item.ooc) != id(self.ooc):
+            return False
+        return self.index(item) >= 0
+
+    def count(self, item) -> int:
+        c = 0
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
+            index = 0
+            while True:
+                encoded = txn.get(self._key_for_index(index))
+                if encoded is None:
+                    break
+                if isinstance(item, _Lazy):
+                    if item.TYPE_CODE == encoded[0] and item.key == encoded[1:]:
+                        c += 1
+                else:
+                    element = self.ooc._decode(encoded)
+                    if item == element:
+                        c += 1
+                index += 1
+        return c
+
+    def index(self, item) -> int:
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
+            index = 0
+            while True:
+                encoded = txn.get(self._key_for_index(index))
+                if encoded is None:
+                    break
+                if isinstance(item, _Lazy):
+                    if item.TYPE_CODE == encoded[0] and item.key == encoded[1:]:
+                        return index
+                else:
+                    element = self.ooc._decode(encoded)
+                    if item == element:
+                        return index
+                index += 1
+        return -1
 
 
 class LazyDict(_Lazy):
