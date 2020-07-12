@@ -1,6 +1,6 @@
 import codecs
 import struct
-from hashlib import blake2b, blake2s
+from hashlib import blake2s
 from os import PathLike
 from typing import *
 
