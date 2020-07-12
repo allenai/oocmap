@@ -49,7 +49,7 @@ class OOCMap(object):
             map_size=max_size,
             max_readers=os.cpu_count() * 2,
             max_spare_txns=os.cpu_count() * 2,
-            max_dbs=5,
+            max_dbs=6,
             writemap=False,
             metasync=False,
             sync=True,
@@ -65,7 +65,10 @@ class OOCMap(object):
             b"strings",
             integerkey=True)
         self.lists_db = self.lmdb_env.open_db(
-            b"lists_and_tuples",
+            b"lists",
+            integerkey=True)
+        self.tuples_db = self.lmdb_env.open_db(
+            b"tuples",
             integerkey=True)
         self.dicts_db = self.lmdb_env.open_db(
             b"dicts",
@@ -149,7 +152,7 @@ class OOCMap(object):
             encoded.extend(struct.pack("<I", len(v)))
             for v2 in v:
                 self._encode(encoded, v2)
-            h = self._write_immutable_value_to_db(encoded, self.lists_db, write_to_db)
+            h = self._write_immutable_value_to_db(encoded, self.tuples_db, write_to_db)
             b.append(LazyTuple.TYPE_CODE)                   # type code for non-empty tuple
             b.extend(h)
         elif isinstance(v, list):
@@ -363,7 +366,7 @@ class LazyTuple(_Lazy):
     TYPE_CODE = 7
 
     def __getitem__(self, index) -> Any:
-        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
             encoded = txn.get(self.key)
             length = struct.unpack_from("<I", encoded)[0]
             if index < length:
@@ -377,14 +380,14 @@ class LazyTuple(_Lazy):
             return self.ooc._decode(encoded)
 
     def __len__(self) -> int:
-        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
             encoded = txn.get(self.key)
             length = struct.unpack_from("<I", encoded)[0]
             return length
 
     def eager(self) -> Tuple:
         elements = []
-        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
             encoded = txn.get(self.key)
             length = struct.unpack_from("<I", encoded)[0]
             for index in range(length):
@@ -402,7 +405,7 @@ class LazyTuple(_Lazy):
 
     def count(self, item) -> int:
         c = 0
-        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
             encoded = txn.get(self.key)
             length = struct.unpack_from("<I", encoded)[0]
             for index in range(length):
@@ -420,7 +423,7 @@ class LazyTuple(_Lazy):
         return c
 
     def index(self, item) -> int:
-        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
             encoded = txn.get(self.key)
             length = struct.unpack_from("<I", encoded)[0]
             for index in range(length):
