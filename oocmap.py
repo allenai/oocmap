@@ -545,6 +545,15 @@ class LazyList(_Lazy):
                 index += 1
         return -1
 
+    def clear(self) -> None:
+        with self.ooc.lmdb_env.begin(write=True, db=self.ooc.lists_db) as txn:
+            index = 0
+            while True:
+                deleted = txn.delete(self._key_for_index(index))
+                if not deleted:
+                    break
+            txn.put(self.key, int(0).to_bytes(4, _BYTEORDER, signed=False))
+
 
 class LazyDict(_Lazy):
     TYPE_CODE = 11
