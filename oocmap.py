@@ -77,7 +77,7 @@ class OOCMap(object):
             integerkey=True)
         self.dicts_db = self.lmdb_env.open_db(
             b"dicts",
-            integerkey=True)
+            integerkey=False)
 
         self.id_to_key = {}
         self.ids_written_this_transaction = {}
@@ -174,7 +174,8 @@ class OOCMap(object):
             if not write_to_db:
                 raise ValueError("Can't encode mutable values without writing to the db.")
 
-            # encode all the list items
+            # Encode all the list items up front so we don't create a mega
+            # transaction for a mega list.
             v_encoded = []
             for item in v:
                 item_encoded = bytearray()
@@ -182,7 +183,7 @@ class OOCMap(object):
                 v_encoded.append(bytes(item_encoded))
 
             # Keys for list_db are half a unique identifier of the list, and half the index
-            # of the element.
+            # of the element. The key where the index is 0xffffffff stores the length.
             key = self.id_to_key.get(id(v))
             with self.lmdb_env.begin(write=True, db=self.lists_db) as txn:
                 if key is None:
@@ -201,26 +202,31 @@ class OOCMap(object):
         elif isinstance(v, dict):
             if not write_to_db:
                 raise ValueError("Can't encode mutable values without writing to the db.")
+
+            # Encode keys and values up front so we don't create a mega
+            # transaction for a mega dict.
+            key_values_encoded = []
+            for key, value in v.items():
+                key_encoded = bytearray()
+                self._encode(key_encoded, key, write_to_db)
+                value_encoded = bytearray()
+                self._encode(value_encoded, value, write_to_db)
+                key_values_encoded.append((bytes(key_encoded), bytes(value_encoded)))
+
             key = self.id_to_key.get(id(v))
-            if key is not None:
-                assert len(key) == 8
-                b.append(LazyDict.TYPE_CODE)                # type code for dict
-                b.extend(key)
-            else:
-                # We store first all keys, then all values. We do this so when we're reading it we can
-                # read in all the keys at once for fast lookup.
-                encoded = bytearray()
-                encoded.extend(struct.pack("<I", len(v)))
-                encoded_values = bytearray()
-                for k2, v2 in v.items():
-                    self._encode(encoded, k2)
-                    self._encode(encoded_values, v2)
-                encoded.extend(encoded_values)
-                key = self._key_for_mutable_value(v)
-                self._write_mutable_value_to_db(key, encoded, self.dicts_db)
-                self.id_to_key[id(v)] = key
-                b.append(LazyDict.TYPE_CODE)                # type code for dict
-                b.extend(key)
+            with self.lmdb_env.begin(write=True, db=self.dicts_db) as txn:
+                if key is None:
+                    key = _random_bytes(4)
+                    while txn.get(key) is not None:
+                        key = _random_bytes(4)
+                txn.put(key, len(v).to_bytes(4, _BYTEORDER, signed=False))
+                for key_encoded, value_encoded in key_values_encoded:
+                    txn.put(key + key_encoded, value_encoded)
+
+            self.id_to_key[id(v)] = key
+
+            b.append(LazyDict.TYPE_CODE)                # type code for dict
+            b.extend(key + b"\x00\x00\x00\x00")
         else:
             raise NotImplementedError("This type is not supported.")
 
@@ -260,7 +266,7 @@ class OOCMap(object):
         elif type_code == LazyTuple.TYPE_CODE:
             return LazyTuple(self, encoded)
         elif type_code == LazyDict.TYPE_CODE:
-            return LazyDict(self, encoded)
+            return LazyDict(self, encoded[:4])
         else:
             raise ValueError(f"Unknown type code {type_code}")
 
@@ -302,6 +308,9 @@ class OOCMap(object):
         if not deleted:
             raise KeyError()
 
+    def __len__(self) -> int:
+        with self.lmdb_env.begin(write=False) as txn:
+            return txn.stat(self.root_db)["entries"]
 
 class _Lazy:
     __slots__ = ["ooc", "key"]
@@ -556,7 +565,37 @@ class LazyList(_Lazy):
 
 
 class LazyDict(_Lazy):
+    # TODO: implement more dict methods
     TYPE_CODE = 11
+
+    def __len__(self) -> int:
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.dicts_db, buffers=True) as txn:
+            encoded = txn.get(self.key)
+            length = struct.unpack("<I", encoded)[0]
+            return length
+
+    def __getitem__(self, key):
+        key_encoded = bytearray(self.key)
+        self.ooc._encode(key_encoded, key, write_to_db=False)
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.dicts_db, buffers=True) as txn:
+            value_encoded = txn.get(key_encoded)
+            if value_encoded is None:
+                raise KeyError()
+            return self.ooc._decode(value_encoded)
+
+    def eager(self) -> Dict:
+        result = {}
+        with self.ooc.lmdb_env.begin(write=False, buffers=True) as txn:
+            with txn.cursor(self.ooc.dicts_db) as cur:
+                success = cur.set_key(self.key)
+                assert success
+                while cur.next():
+                    key_encoded, value_encoded = cur.item()
+                    if key_encoded[:len(self.key)] != self.key:
+                        break
+                    key_encoded = key_encoded[len(self.key):]
+                    result[self.ooc._decode(key_encoded)] = self.ooc._decode(value_encoded)
+        return result
 
 
 # old stuff

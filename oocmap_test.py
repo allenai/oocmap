@@ -18,12 +18,13 @@ def test_oocmap_types():
         "emptytuple": (),
         "tuple": (1, True, False, 0, 2, 3),
         "list": [2, 3],
-        #"dict": { 1: "eins", 2: "zwei" }
+        "dict": { 1: "eins", 2: "zwei" }
     }
     with tempfile.NamedTemporaryFile() as f:
         m = OOCMap(f.name, max_size=32*1024*1024)
         for key, value in tests.items():
             m[key] = value
+        assert len(m) == len(tests)
         for key, value in tests.items():
             retrieved = m[key]
             assert retrieved == value
