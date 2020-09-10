@@ -5,6 +5,8 @@ import pytest
 from oocmap import OOCMap
 
 
+SMALL_MAP = 32*1024*1024
+
 def result_or_exception(fn):
     try:
         return fn()
@@ -38,7 +40,7 @@ def test_oocmap_types():
         "dict": { 1: "eins", 2: "zwei" }
     }
     with tempfile.NamedTemporaryFile() as f:
-        m = OOCMap(f.name, max_size=32*1024*1024)
+        m = OOCMap(f.name, max_size=SMALL_MAP)
         for key, value in tests.items():
             m[key] = value
         assert len(m) == len(tests)
@@ -52,7 +54,7 @@ def test_oocmap_types():
 
 def test_oocmap_list():
     with tempfile.NamedTemporaryFile() as f:
-        m = OOCMap(f.name, max_size=32*1024*1024)
+        m = OOCMap(f.name, max_size=SMALL_MAP)
         m[999] = ("Paul", "Ringo", "George", "John Winston Ono Lennon")
 
         l = [1, 2.0, "three", m[999]]
