@@ -603,6 +603,7 @@ class LazyList(_Lazy):
                 deleted = txn.delete(self._key_for_index(index))
                 if not deleted:
                     break
+                index += 1
             txn.put(self.key, int(0).to_bytes(4, _BYTEORDER, signed=False))
 
     def append(self, value):
