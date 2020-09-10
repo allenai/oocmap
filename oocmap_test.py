@@ -53,7 +53,9 @@ def test_oocmap_types():
 def test_oocmap_list():
     with tempfile.NamedTemporaryFile() as f:
         m = OOCMap(f.name, max_size=32*1024*1024)
-        l = [1,2,3]
+        m[999] = ("Paul", "Ringo", "George", "John Winston Ono Lennon")
+
+        l = [1, 2.0, "three", m[999]]
         m[0] = l
         assert l == m[0]
 
@@ -67,7 +69,7 @@ def test_oocmap_list():
                     lambda: m[0].index(item, index))
 
         m[0].append(4)
-        assert m[0].eager() == [1,2,3,4]
+        assert m[0].eager() == [1, 2.0, "three", m[999], 4]
 
         m[0].clear()
         assert m[0].eager() == []

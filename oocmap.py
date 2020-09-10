@@ -131,6 +131,12 @@ class OOCMap(object):
         if hardcoded is not None:
             b.append(0)
             b.extend(hardcoded)
+        elif isinstance(v, _Lazy):
+            if v.ooc == self:
+                b.append(v.TYPE_CODE)
+                b.extend(v.key)
+            else:
+                self._encode(b, v.eager(), write_to_db=write_to_db)
         elif isinstance(v, int):
             try:
                 encoded = v.to_bytes(8, _BYTEORDER, signed=True)
