@@ -520,7 +520,7 @@ class LazyList(_Lazy):
             if index < 0:
                 index = length + index
             if index < 0 or index >= length:
-                raise IndexError("list index out of range")
+                raise IndexError("list assignment index out of range")
             txn.put(self._key_for_index(index), encoded)
 
     def __len__(self) -> int:
