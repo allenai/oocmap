@@ -79,7 +79,6 @@ class OOCMap(object):
             b"dicts",
             integerkey=False)
 
-        self.id_to_key = {}
         self.ids_written_this_transaction = {}
         self.transaction_count = 0
 
@@ -188,20 +187,16 @@ class OOCMap(object):
                 self._encode(item_encoded, item, write_to_db)
                 v_encoded.append(bytes(item_encoded))
 
-            # Keys for list_db are half a unique identifier of the list, and half the index
-            # of the element. The key where the index is 0xffffffff stores the length.
-            key = self.id_to_key.get(id(v))
             with self.lmdb_env.begin(write=True, db=self.lists_db) as txn:
-                if key is None:
+                # Keys for list_db are half a unique identifier of the list, and half the index
+                # of the element. The key where the index is 0xffffffff stores the length.
+                key = _random_bytes(4) + b"\xff\xff\xff\xff"
+                while txn.get(key) is not None:
                     key = _random_bytes(4) + b"\xff\xff\xff\xff"
-                    while txn.get(key) is not None:
-                        key = _random_bytes(4) + b"\xff\xff\xff\xff"
                 txn.put(key, len(v).to_bytes(4, _BYTEORDER, signed=False))
                 for i, item_encoded in enumerate(v_encoded):
                     item_key = key[:4] + i.to_bytes(4, _BYTEORDER, signed=False)
                     txn.put(item_key, item_encoded)
-
-            self.id_to_key[id(v)] = key
 
             b.append(LazyList.TYPE_CODE)                # type code for list
             b.extend(key)
@@ -219,17 +214,13 @@ class OOCMap(object):
                 self._encode(value_encoded, value, write_to_db)
                 key_values_encoded.append((bytes(key_encoded), bytes(value_encoded)))
 
-            key = self.id_to_key.get(id(v))
             with self.lmdb_env.begin(write=True, db=self.dicts_db) as txn:
-                if key is None:
+                key = _random_bytes(4)
+                while txn.get(key) is not None:
                     key = _random_bytes(4)
-                    while txn.get(key) is not None:
-                        key = _random_bytes(4)
                 txn.put(key, len(v).to_bytes(4, _BYTEORDER, signed=False))
                 for key_encoded, value_encoded in key_values_encoded:
                     txn.put(key + key_encoded, value_encoded)
-
-            self.id_to_key[id(v)] = key
 
             b.append(LazyDict.TYPE_CODE)                # type code for dict
             b.extend(key + b"\x00\x00\x00\x00")
