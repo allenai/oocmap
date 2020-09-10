@@ -93,8 +93,7 @@ def test_two_oocmaps():
             m1[1031] = ["eins", "zwei", "drei"]
             m1[1041] = ["一", "二", "三"]
             m2[0] = [m1[1033], m1[1031], m1[1041]]
-            eager = m2[0].eager()
-            assert eager == [["one", "two", "three"], ["eins", "zwei", "drei"], ["一", "二", "三"]]
+            assert m2[0] == [["one", "two", "three"], ["eins", "zwei", "drei"], ["一", "二", "三"]]
 
 
 
