@@ -93,6 +93,26 @@ def test_oocmap_list():
         m[0].append(4)
         assert m[0].eager() == [1, 2.0, "three", m[999], 4]
 
+        # LazyList.__del__()
+        del m[0][-1]  # make the two lists the same again after append
+        for index in [-10, 10, -2, 1]:
+            def delete_l():
+                del l[index]
+            def delete_m():
+                del m[0][index]
+            assert_equal_including_exceptions(delete_l, delete_m)
+        assert l == m[0].eager()
+
+        # LazyList.__setitem__()
+        for index in range(-5, 5):
+            def assign_l():
+                l[index] = None
+            def assign_m():
+                m[0][index] = None
+            assert_equal_including_exceptions(assign_l, assign_m)
+        assert l == [None] * 2
+        assert l == m[0].eager()
+
         # LazyList.clear()
         m[0].clear()
         assert m[0].eager() == []
