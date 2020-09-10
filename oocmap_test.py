@@ -5,6 +5,23 @@ import pytest
 from oocmap import OOCMap
 
 
+def result_or_exception(fn):
+    try:
+        return fn()
+    except Exception as e:
+        return e
+
+
+def assert_equal_including_exceptions(expected_fn, actual_fn):
+    try:
+        expected = expected_fn()
+    except Exception as e:
+        with pytest.raises(e.__class__):
+            actual_fn()
+    else:
+        assert expected == actual_fn()
+
+
 def test_oocmap_types():
     tests = {
         "smallint": 42,
@@ -33,12 +50,28 @@ def test_oocmap_types():
                 _ = m[key]
         assert len(m) == 0
 
-def test_oocmap_list_append():
+def test_oocmap_list():
     with tempfile.NamedTemporaryFile() as f:
         m = OOCMap(f.name, max_size=32*1024*1024)
         l = [1,2,3]
         m[0] = l
-        l_from_map = m[0]
-        assert l == l_from_map
-        l_from_map.append(4)
+        assert l == m[0]
+
+        assert m[0].index(2) == 1
+        with pytest.raises(ValueError):
+            m[0].index(5)
+        for item in l + ["notfound"]:
+            for index in range(-10, 10):
+                assert_equal_including_exceptions(
+                    lambda: l.index(item, index),
+                    lambda: m[0].index(item, index))
+
+        m[0].append(4)
         assert m[0].eager() == [1,2,3,4]
+
+        m[0].clear()
+        assert m[0].eager() == []
+
+        m[0] = l
+
+
