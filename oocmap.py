@@ -523,6 +523,21 @@ class LazyList(_Lazy):
                 raise IndexError("list assignment index out of range")
             txn.put(self._key_for_index(index), encoded)
 
+    def __delitem__(self, index: int):
+        with self.ooc.lmdb_env.begin(write=True, db=self.ooc.lists_db, buffers=False) as txn:
+            length = len(self)
+            if index < 0:
+                index = length + index
+            if index < 0 or index >= length:
+                raise IndexError("list assignment index out of range")
+            # write the length
+            txn.put(self.key, (length-1).to_bytes(4, _BYTEORDER, signed=False))
+            # move all the items that come after
+            for i in range(index+1, length):
+                item = txn.get(self._key_for_index(i))
+                txn.put(self._key_for_index(i-1), item)
+            txn.delete(self._key_for_index(length-1))
+
     def __len__(self) -> int:
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
             encoded = txn.get(self.key)
