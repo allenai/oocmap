@@ -83,4 +83,18 @@ def test_oocmap_list():
 
         m[0] = l
 
+def test_two_oocmaps():
+    with tempfile.NamedTemporaryFile() as f1:
+        m1 = OOCMap(f1.name, max_size=SMALL_MAP)
+        with tempfile.NamedTemporaryFile() as f2:
+            m2 = OOCMap(f2.name, max_size=SMALL_MAP)
+
+            m1[1033] = ["one", "two", "three"]
+            m1[1031] = ["eins", "zwei", "drei"]
+            m1[1041] = ["一", "二", "三"]
+            m2[0] = [m1[1033], m1[1031], m1[1041]]
+            eager = m2[0].eager()
+            assert eager == [["one", "two", "three"], ["eins", "zwei", "drei"], ["一", "二", "三"]]
+
+
 
