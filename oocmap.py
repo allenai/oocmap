@@ -79,7 +79,6 @@ class OOCMap(object):
             b"dicts",
             integerkey=False)
 
-        self.id_to_key = {}
         self.ids_written_this_transaction = {}
         self.transaction_count = 0
 
@@ -131,6 +130,12 @@ class OOCMap(object):
         if hardcoded is not None:
             b.append(0)
             b.extend(hardcoded)
+        elif isinstance(v, _Lazy):
+            if v.ooc == self:
+                b.append(v.TYPE_CODE)
+                b.extend(v.key)
+            else:
+                self._encode(b, v.eager(), write_to_db=write_to_db)
         elif isinstance(v, int):
             try:
                 encoded = v.to_bytes(8, _BYTEORDER, signed=True)
@@ -182,20 +187,16 @@ class OOCMap(object):
                 self._encode(item_encoded, item, write_to_db)
                 v_encoded.append(bytes(item_encoded))
 
-            # Keys for list_db are half a unique identifier of the list, and half the index
-            # of the element. The key where the index is 0xffffffff stores the length.
-            key = self.id_to_key.get(id(v))
             with self.lmdb_env.begin(write=True, db=self.lists_db) as txn:
-                if key is None:
+                # Keys for list_db are half a unique identifier of the list, and half the index
+                # of the element. The key where the index is 0xffffffff stores the length.
+                key = _random_bytes(4) + b"\xff\xff\xff\xff"
+                while txn.get(key) is not None:
                     key = _random_bytes(4) + b"\xff\xff\xff\xff"
-                    while txn.get(key) is not None:
-                        key = _random_bytes(4) + b"\xff\xff\xff\xff"
                 txn.put(key, len(v).to_bytes(4, _BYTEORDER, signed=False))
                 for i, item_encoded in enumerate(v_encoded):
                     item_key = key[:4] + i.to_bytes(4, _BYTEORDER, signed=False)
                     txn.put(item_key, item_encoded)
-
-            self.id_to_key[id(v)] = key
 
             b.append(LazyList.TYPE_CODE)                # type code for list
             b.extend(key)
@@ -213,17 +214,13 @@ class OOCMap(object):
                 self._encode(value_encoded, value, write_to_db)
                 key_values_encoded.append((bytes(key_encoded), bytes(value_encoded)))
 
-            key = self.id_to_key.get(id(v))
             with self.lmdb_env.begin(write=True, db=self.dicts_db) as txn:
-                if key is None:
+                key = _random_bytes(4)
+                while txn.get(key) is not None:
                     key = _random_bytes(4)
-                    while txn.get(key) is not None:
-                        key = _random_bytes(4)
                 txn.put(key, len(v).to_bytes(4, _BYTEORDER, signed=False))
                 for key_encoded, value_encoded in key_values_encoded:
                     txn.put(key + key_encoded, value_encoded)
-
-            self.id_to_key[id(v)] = key
 
             b.append(LazyDict.TYPE_CODE)                # type code for dict
             b.extend(key + b"\x00\x00\x00\x00")
@@ -311,6 +308,36 @@ class OOCMap(object):
     def __len__(self) -> int:
         with self.lmdb_env.begin(write=False) as txn:
             return txn.stat(self.root_db)["entries"]
+
+    def dump(self):
+        def dump_db(db):
+            with self.lmdb_env.begin(write=False) as txn:
+                with txn.cursor(db) as cursor:
+                    if not cursor.first():
+                        return
+                    while True:
+                        print(f"  {repr(bytes(cursor.key()))} : {repr(bytes(cursor.value()))}")
+                        if not cursor.next():
+                            return
+
+        print("root_db:")
+        dump_db(self.root_db)
+
+        print("ints_db:")
+        dump_db(self.ints_db)
+
+        print("strings_db:")
+        dump_db(self.strings_db)
+
+        print("lists_db:")
+        dump_db(self.lists_db)
+
+        print("tuples_db:")
+        dump_db(self.tuples_db)
+
+        print("dicts_db:")
+        dump_db(self.dicts_db)
+
 
 class _Lazy:
     __slots__ = ["ooc", "key"]
@@ -477,10 +504,10 @@ class LazyList(_Lazy):
     def __getitem__(self, index: int) -> Any:
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
             length = len(self)
-            if index < length:
-                index = length - index
-            if index > length:
-                raise IndexError()
+            if index < 0:
+                index = length + index
+            if index < 0 or index >= length:
+                raise IndexError("list index out of range")
             encoded = txn.get(self._key_for_index(index))
             return self.ooc._decode(encoded)
 
@@ -490,11 +517,26 @@ class LazyList(_Lazy):
 
         with self.ooc.lmdb_env.begin(write=True, db=self.ooc.lists_db) as txn:
             length = len(self)
-            if index < length:
-                index = length - index
-            if index > length:
-                raise IndexError()
+            if index < 0:
+                index = length + index
+            if index < 0 or index >= length:
+                raise IndexError("list assignment index out of range")
             txn.put(self._key_for_index(index), encoded)
+
+    def __delitem__(self, index: int):
+        with self.ooc.lmdb_env.begin(write=True, db=self.ooc.lists_db, buffers=False) as txn:
+            length = len(self)
+            if index < 0:
+                index = length + index
+            if index < 0 or index >= length:
+                raise IndexError("list assignment index out of range")
+            # write the length
+            txn.put(self.key, (length-1).to_bytes(4, _BYTEORDER, signed=False))
+            # move all the items that come after
+            for i in range(index+1, length):
+                item = txn.get(self._key_for_index(i))
+                txn.put(self._key_for_index(i-1), item)
+            txn.delete(self._key_for_index(length-1))
 
     def __len__(self) -> int:
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
@@ -517,7 +559,11 @@ class LazyList(_Lazy):
     def __contains__(self, item) -> bool:
         if isinstance(item, _Lazy) and id(item.ooc) != id(self.ooc):
             return False
-        return self.index(item) >= 0
+        try:
+            self.index(item)
+            return True
+        except ValueError:
+            return False
 
     def count(self, item) -> int:
         c = 0
@@ -537,10 +583,19 @@ class LazyList(_Lazy):
                 index += 1
         return c
 
-    def index(self, item) -> int:
+    def index(self, item, start: Optional[int] = None, end: Optional[int] = None) -> int:
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
-            index = 0
+            if start is None:
+                index = 0
+            else:
+                index = start
             while True:
+                # This is some pretty weird indexing behavior, but that's what the built-in list does.
+                if index < 0:
+                    index = len(self) + index
+                    if index < 0:
+                        index = 0
+
                 encoded = txn.get(self._key_for_index(index))
                 if encoded is None:
                     break
@@ -552,7 +607,9 @@ class LazyList(_Lazy):
                     if item == element:
                         return index
                 index += 1
-        return -1
+                if end is not None and end >= index:
+                    break
+        raise ValueError(f"{item} is not in list")
 
     def clear(self) -> None:
         with self.ooc.lmdb_env.begin(write=True, db=self.ooc.lists_db) as txn:
@@ -561,7 +618,18 @@ class LazyList(_Lazy):
                 deleted = txn.delete(self._key_for_index(index))
                 if not deleted:
                     break
+                index += 1
             txn.put(self.key, int(0).to_bytes(4, _BYTEORDER, signed=False))
+
+    def append(self, value):
+        # first write the new value into the map
+        encoded = bytearray()
+        self.ooc._encode(encoded, value)
+
+        with self.ooc.lmdb_env.begin(write=True, db=self.ooc.lists_db) as txn:
+            index = len(self)
+            txn.put(self._key_for_index(index), encoded)
+            txn.put(self.key, (index+1).to_bytes(4, _BYTEORDER, signed=False))
 
 
 class LazyDict(_Lazy):
@@ -596,104 +664,3 @@ class LazyDict(_Lazy):
                     key_encoded = key_encoded[len(self.key):]
                     result[self.ooc._decode(key_encoded)] = self.ooc._decode(value_encoded)
         return result
-
-
-# old stuff
-
-class LazyInt(_Lazy):
-    def __int__(self) -> int:
-        if self.value is None:
-            with self.ooc.lmdb_env.begin(write=False, db=self.ooc.ints_db) as txn:
-                r = txn.get(self.key)
-            self.value = int.from_bytes(r, _BYTEORDER)
-            self.ooc = None     # No need to keep the reference now
-        return self.value
-    __index__ = __int__
-    def __float__(self):
-        return int(self).__float__()
-
-    def __add__(self, other):
-        return int(self).__add__(other)
-    def __sub__(self, other):
-        return int(self).__sub__(other)
-    def __mul__(self, other):
-        return int(self).__mul__(other)
-    def __truediv__(self, other):
-        return int(self).__truediv__(other)
-    def __floordiv__(self, other):
-        return int(self).__floordiv__(other)
-    def __mod__(self, other):
-        return int(self).__mod__(other)
-    def __divmod__(self, other):
-        return int(self).__divmod__(other)
-    def __pow__(self, other, modulo):
-        return int(self).__pow__(other, modulo)
-    def __lshift__(self, other):
-        return int(self).__lshift__(other)
-    def __rshift__(self, other):
-        return int(self).__rshift__(other)
-    def __and__(self, other):
-        return int(self).__and__(other)
-    def __xor__(self, other):
-        return int(self).__xor__(other)
-    def __or__(self, other):
-        return int(self).__or__(other)
-
-    def __radd__(self, other):
-        return int(self).__radd__(other)
-    def __rsub__(self, other):
-        return int(self).__rsub__(other)
-    def __rmul__(self, other):
-        return int(self).__rmul__(other)
-    def __rtruediv__(self, other):
-        return int(self).__rtruediv__(other)
-    def __rfloordiv__(self, other):
-        return int(self).__rfloordiv__(other)
-    def __rmod__(self, other):
-        return int(self).__rmod__(other)
-    def __rdivmod__(self, other):
-        return int(self).__rdivmod__(other)
-    def __rpow__(self, other, modulo):
-        return int(self).__rpow__(other, modulo)
-    def __rlshift__(self, other):
-        return int(self).__rlshift__(other)
-    def __rrshift__(self, other):
-        return int(self).__rrshift__(other)
-    def __rand__(self, other):
-        return int(self).__rand__(other)
-    def __rxor__(self, other):
-        return int(self).__rxor__(other)
-    def __ror__(self, other):
-        return int(self).__ror__(other)
-
-    def __neg__(self):
-        return int(self).__neg__()
-    def __pos__(self):
-        return self
-    def __abs__(self):
-        return int(self).__abs__()
-    def __invert__(self):
-        return int(self).__invert__()
-
-    def __round__(self, ndigits):
-        return int(self).__round__(ndigits)
-    def __trunc__(self):
-        return self
-    __floor__ = __trunc__
-    __ceil__ = __trunc__
-
-    def __str__(self):
-        return int(self).__str__()
-
-
-class LazyStr(_Lazy):
-    __slots__ = ["ooc", "key", "value"]
-
-    def __str__(self) -> str:
-        if self.value is None:
-            with self.ooc.lmdb_env.begin(write=False, db=self.ooc.strings_db) as txn:
-                r = txn.get(self.key)
-            self.value = r.decode("UTF-8")
-            self.ooc = None     # No need to keep the reference now
-        return self.value
-
