@@ -309,6 +309,36 @@ class OOCMap(object):
         with self.lmdb_env.begin(write=False) as txn:
             return txn.stat(self.root_db)["entries"]
 
+    def dump(self):
+        def dump_db(db):
+            with self.lmdb_env.begin(write=False) as txn:
+                with txn.cursor(db) as cursor:
+                    if not cursor.first():
+                        return
+                    while True:
+                        print(f"  {repr(bytes(cursor.key()))} : {repr(bytes(cursor.value()))}")
+                        if not cursor.next():
+                            return
+
+        print("root_db:")
+        dump_db(self.root_db)
+
+        print("ints_db:")
+        dump_db(self.ints_db)
+
+        print("strings_db:")
+        dump_db(self.strings_db)
+
+        print("lists_db:")
+        dump_db(self.lists_db)
+
+        print("tuples_db:")
+        dump_db(self.tuples_db)
+
+        print("dicts_db:")
+        dump_db(self.dicts_db)
+
+
 class _Lazy:
     __slots__ = ["ooc", "key"]
     TYPE_CODE = NotImplemented
