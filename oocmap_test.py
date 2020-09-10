@@ -61,32 +61,41 @@ def test_oocmap_list():
         m[0] = l
         assert l == m[0]
 
-        assert m[0].index(2) == 1
-        with pytest.raises(ValueError):
-            m[0].index(5)
+        # LazyList.__len__()
+        assert len(l) == len(m[0])
+
+        # LazyList.index()
         for item in l + ["notfound"]:
             for index in range(-10, 10):
                 assert_equal_including_exceptions(
                     lambda: l.index(item, index),
                     lambda: m[0].index(item, index))
 
+        # LazyList.__getitem__()
+        for index in range(-10, 10):
+            assert_equal_including_exceptions(
+                lambda: l[index],
+                lambda: m[0][index])
+
+        # LazyList.count()
         for item in l + ["notfound"]:
             assert_equal_including_exceptions(
                 lambda: l.count(item),
                 lambda: m[0].count(item))
 
+        # LazyList.__contains__()
         for item in l + ["notfound"]:
             assert_equal_including_exceptions(
                 lambda: item in l,
                 lambda: item in m[0])
 
+        # LazyList.append()
         m[0].append(4)
         assert m[0].eager() == [1, 2.0, "three", m[999], 4]
 
+        # LazyList.clear()
         m[0].clear()
         assert m[0].eager() == []
-
-        m[0] = l
 
 def test_two_oocmaps():
     with tempfile.NamedTemporaryFile() as f1:

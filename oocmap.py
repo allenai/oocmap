@@ -504,9 +504,9 @@ class LazyList(_Lazy):
     def __getitem__(self, index: int) -> Any:
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
             length = len(self)
-            if index < length:
-                index = length - index
-            if index > length:
+            if index < 0:
+                index = length + index
+            if index < 0 or index >= length:
                 raise IndexError("list index out of range")
             encoded = txn.get(self._key_for_index(index))
             return self.ooc._decode(encoded)
@@ -517,9 +517,9 @@ class LazyList(_Lazy):
 
         with self.ooc.lmdb_env.begin(write=True, db=self.ooc.lists_db) as txn:
             length = len(self)
-            if index < length:
-                index = length - index
-            if index > length:
+            if index < 0:
+                index = length + index
+            if index < 0 or index >= length:
                 raise IndexError("list index out of range")
             txn.put(self._key_for_index(index), encoded)
 
