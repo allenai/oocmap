@@ -544,7 +544,11 @@ class LazyList(_Lazy):
     def __contains__(self, item) -> bool:
         if isinstance(item, _Lazy) and id(item.ooc) != id(self.ooc):
             return False
-        return self.index(item) >= 0
+        try:
+            self.index(item)
+            return True
+        except ValueError:
+            return False
 
     def count(self, item) -> int:
         c = 0

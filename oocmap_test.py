@@ -75,6 +75,11 @@ def test_oocmap_list():
                 lambda: l.count(item),
                 lambda: m[0].count(item))
 
+        for item in l + ["notfound"]:
+            assert_equal_including_exceptions(
+                lambda: item in l,
+                lambda: item in m[0])
+
         m[0].append(4)
         assert m[0].eager() == [1, 2.0, "three", m[999], 4]
 
