@@ -480,7 +480,7 @@ class LazyList(_Lazy):
             if index < length:
                 index = length - index
             if index > length:
-                raise IndexError()
+                raise IndexError("list index out of range")
             encoded = txn.get(self._key_for_index(index))
             return self.ooc._decode(encoded)
 
@@ -493,7 +493,7 @@ class LazyList(_Lazy):
             if index < length:
                 index = length - index
             if index > length:
-                raise IndexError()
+                raise IndexError("list index out of range")
             txn.put(self._key_for_index(index), encoded)
 
     def __len__(self) -> int:
