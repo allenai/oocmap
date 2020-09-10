@@ -563,6 +563,16 @@ class LazyList(_Lazy):
                     break
             txn.put(self.key, int(0).to_bytes(4, _BYTEORDER, signed=False))
 
+    def append(self, value):
+        # first write the new value into the map
+        encoded = bytearray()
+        self.ooc._encode(encoded, value)
+
+        with self.ooc.lmdb_env.begin(write=True, db=self.ooc.lists_db) as txn:
+            index = len(self)
+            txn.put(self._key_for_index(index), encoded)
+            txn.put(self.key, (index+1).to_bytes(4, _BYTEORDER, signed=False))
+
 
 class LazyDict(_Lazy):
     # TODO: implement more dict methods
