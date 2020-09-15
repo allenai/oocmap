@@ -428,12 +428,13 @@ class LazyTuple(_Lazy):
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
             encoded = txn.get(self.key)
             length = struct.unpack_from("<I", encoded)[0]
-            if index < length:
-                index = length - index
-            if index > length:
-                raise IndexError()
+            if index < 0:
+                index = length + index
+            if index < 0 or index >= length:
+                raise IndexError("tuple index out of range")
+
             encoded = encoded[
-                4 + index * 9,
+                4 + index * 9:
                 4 + index * 9 + 9
             ]
             return self.ooc._decode(encoded)
@@ -454,7 +455,11 @@ class LazyTuple(_Lazy):
     def __contains__(self, item) -> bool:
         if isinstance(item, _Lazy) and id(item.ooc) != id(self.ooc):
             return False
-        return self.index(item) >= 0
+        try:
+            self.index(item)
+            return True
+        except ValueError:
+            return False
 
     def count(self, item) -> int:
         c = 0
