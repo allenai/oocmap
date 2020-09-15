@@ -475,11 +475,27 @@ class LazyTuple(_Lazy):
                         c += 1
         return c
 
-    def index(self, item) -> int:
+    def index(self, item, start: Optional[int] = None, end: Optional[int] = None) -> int:
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
             encoded = txn.get(self.key)
             length = struct.unpack_from("<I", encoded)[0]
-            for index in range(length):
+
+            if start is None:
+                start = 0
+            elif start < 0:
+                # This is some pretty weird indexing behavior, but that's what the built-in list does.
+                start += length
+                if start < 0:
+                    start = 0
+
+            if end is None:
+                end = length
+            elif end < 0:
+                end += length
+            elif end > length:
+                end = length
+
+            for index in range(start, end):
                 encoded_item = encoded[
                     4 + index * 9:
                     4 + index * 9 + 9
@@ -491,7 +507,7 @@ class LazyTuple(_Lazy):
                     element = self.ooc._decode(encoded_item)
                     if item == element:
                         return index
-        return -1
+        raise ValueError(f"{item} is not in tuple")
 
 
 class LazyList(_Lazy):
