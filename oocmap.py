@@ -584,13 +584,17 @@ class LazyList(_Lazy):
         return c
 
     def index(self, item, start: Optional[int] = None, end: Optional[int] = None) -> int:
-        if start is None:
-            index = 0
-        else:
-            index = start
-
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
             length = len(self)
+
+            if start is None:
+                start = 0
+            elif start < 0:
+                # This is some pretty weird indexing behavior, but that's what the built-in list does.
+                start += length
+                if start < 0:
+                    start = 0
+
             if end is None:
                 end = length
             elif end < 0:
@@ -598,13 +602,7 @@ class LazyList(_Lazy):
             elif end > length:
                 end = length
 
-            # This is some pretty weird indexing behavior, but that's what the built-in list does.
-            if index < 0:
-                index += length
-                if index < 0:
-                    index = 0
-
-            while index < end:
+            for index in range(start, end):
                 encoded = txn.get(self._key_for_index(index))
                 if encoded is None:
                     raise RuntimeError(f"LazyList {self.key} is corrupted. Missing item {index}.")
@@ -615,7 +613,6 @@ class LazyList(_Lazy):
                     element = self.ooc._decode(encoded)
                     if item == element:
                         return index
-                index += 1
         raise ValueError(f"{item} is not in list")
 
     def clear(self) -> None:
