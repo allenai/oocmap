@@ -60,16 +60,30 @@ def test_oocmap_list():
         l = [1, 2.0, "three", m[999]]
         m[0] = l
         assert l == m[0]
+        assert m[0] == l # not the same thing
 
         # LazyList.__len__()
         assert len(l) == len(m[0])
 
         # LazyList.index()
         for item in l + ["notfound"]:
+            # no indices
+            assert_equal_including_exceptions(
+                lambda: l.index(item),
+                lambda: m[0].index(item))
+
+            # only start index
             for index in range(-10, 10):
                 assert_equal_including_exceptions(
                     lambda: l.index(item, index),
                     lambda: m[0].index(item, index))
+
+            # start and stop index
+            for start_index in range(-10, 10):
+                for end_index in range(-10, 10):
+                    assert_equal_including_exceptions(
+                        lambda: l.index(item, start_index, end_index),
+                        lambda: m[0].index(item, start_index, end_index))
 
         # LazyList.__getitem__()
         for index in range(-10, 10):
