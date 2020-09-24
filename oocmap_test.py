@@ -60,16 +60,30 @@ def test_oocmap_list():
         l = [1, 2.0, "three", m[999]]
         m[0] = l
         assert l == m[0]
+        assert m[0] == l # not the same thing
 
         # LazyList.__len__()
         assert len(l) == len(m[0])
 
         # LazyList.index()
         for item in l + ["notfound"]:
+            # no indices
+            assert_equal_including_exceptions(
+                lambda: l.index(item),
+                lambda: m[0].index(item))
+
+            # only start index
             for index in range(-10, 10):
                 assert_equal_including_exceptions(
                     lambda: l.index(item, index),
                     lambda: m[0].index(item, index))
+
+            # start and stop index
+            for start_index in range(-10, 10):
+                for end_index in range(-10, 10):
+                    assert_equal_including_exceptions(
+                        lambda: l.index(item, start_index, end_index),
+                        lambda: m[0].index(item, start_index, end_index))
 
         # LazyList.__getitem__()
         for index in range(-10, 10):
@@ -116,6 +130,57 @@ def test_oocmap_list():
         # LazyList.clear()
         m[0].clear()
         assert m[0].eager() == []
+
+def test_oocmap_tuple():
+    with tempfile.NamedTemporaryFile() as f:
+        m = OOCMap(f.name, max_size=SMALL_MAP)
+        m[999] = ("Paul", "Ringo", "George", "John Winston Ono Lennon")
+
+        t = (1, 2.0, "three", m[999])
+        m[0] = t
+        assert t == m[0]
+        assert m[0] == t # not the same thing
+
+        # LazyTuple.__len__()
+        assert len(t) == len(m[0])
+
+        # LazyTuple.index()
+        for item in list(t) + ["notfound"]:
+            # no indices
+            assert_equal_including_exceptions(
+                lambda: t.index(item),
+                lambda: m[0].index(item))
+
+            # only start index
+            for index in range(-10, 10):
+                assert_equal_including_exceptions(
+                    lambda: t.index(item, index),
+                    lambda: m[0].index(item, index))
+
+            # start and stop index
+            for start_index in range(-10, 10):
+                for end_index in range(-10, 10):
+                    assert_equal_including_exceptions(
+                        lambda: t.index(item, start_index, end_index),
+                        lambda: m[0].index(item, start_index, end_index))
+
+        # LazyTuple.__getitem__()
+        for index in range(-10, 10):
+            assert_equal_including_exceptions(
+                lambda: t[index],
+                lambda: m[0][index])
+
+        # LazyTuple.count()
+        for item in list(t) + ["notfound"]:
+            assert_equal_including_exceptions(
+                lambda: t.count(item),
+                lambda: m[0].count(item))
+
+        # LazyTuple.__contains__()
+        for item in list(t) + ["notfound"]:
+            assert_equal_including_exceptions(
+                lambda: item in t,
+                lambda: item in m[0])
 
 def test_two_oocmaps():
     with tempfile.NamedTemporaryFile() as f1:

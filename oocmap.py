@@ -428,12 +428,13 @@ class LazyTuple(_Lazy):
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
             encoded = txn.get(self.key)
             length = struct.unpack_from("<I", encoded)[0]
-            if index < length:
-                index = length - index
-            if index > length:
-                raise IndexError()
+            if index < 0:
+                index = length + index
+            if index < 0 or index >= length:
+                raise IndexError("tuple index out of range")
+
             encoded = encoded[
-                4 + index * 9,
+                4 + index * 9:
                 4 + index * 9 + 9
             ]
             return self.ooc._decode(encoded)
@@ -454,7 +455,11 @@ class LazyTuple(_Lazy):
     def __contains__(self, item) -> bool:
         if isinstance(item, _Lazy) and id(item.ooc) != id(self.ooc):
             return False
-        return self.index(item) >= 0
+        try:
+            self.index(item)
+            return True
+        except ValueError:
+            return False
 
     def count(self, item) -> int:
         c = 0
@@ -475,11 +480,27 @@ class LazyTuple(_Lazy):
                         c += 1
         return c
 
-    def index(self, item) -> int:
+    def index(self, item, start: Optional[int] = None, end: Optional[int] = None) -> int:
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.tuples_db, buffers=True) as txn:
             encoded = txn.get(self.key)
             length = struct.unpack_from("<I", encoded)[0]
-            for index in range(length):
+
+            if start is None:
+                start = 0
+            elif start < 0:
+                # This is some pretty weird indexing behavior, but that's what the built-in list does.
+                start += length
+                if start < 0:
+                    start = 0
+
+            if end is None:
+                end = length
+            elif end < 0:
+                end += length
+            elif end > length:
+                end = length
+
+            for index in range(start, end):
                 encoded_item = encoded[
                     4 + index * 9:
                     4 + index * 9 + 9
@@ -491,7 +512,7 @@ class LazyTuple(_Lazy):
                     element = self.ooc._decode(encoded_item)
                     if item == element:
                         return index
-        return -1
+        raise ValueError(f"{item} is not in tuple")
 
 
 class LazyList(_Lazy):
@@ -585,20 +606,27 @@ class LazyList(_Lazy):
 
     def index(self, item, start: Optional[int] = None, end: Optional[int] = None) -> int:
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.lists_db, buffers=True) as txn:
-            if start is None:
-                index = 0
-            else:
-                index = start
-            while True:
-                # This is some pretty weird indexing behavior, but that's what the built-in list does.
-                if index < 0:
-                    index = len(self) + index
-                    if index < 0:
-                        index = 0
+            length = len(self)
 
+            if start is None:
+                start = 0
+            elif start < 0:
+                # This is some pretty weird indexing behavior, but that's what the built-in list does.
+                start += length
+                if start < 0:
+                    start = 0
+
+            if end is None:
+                end = length
+            elif end < 0:
+                end += length
+            elif end > length:
+                end = length
+
+            for index in range(start, end):
                 encoded = txn.get(self._key_for_index(index))
                 if encoded is None:
-                    break
+                    raise RuntimeError(f"LazyList {self.key} is corrupted. Missing item {index}.")
                 if isinstance(item, _Lazy):
                     if item.TYPE_CODE == encoded[0] and item.key == encoded[1:]:
                         return index
@@ -606,9 +634,6 @@ class LazyList(_Lazy):
                     element = self.ooc._decode(encoded)
                     if item == element:
                         return index
-                index += 1
-                if end is not None and end >= index:
-                    break
         raise ValueError(f"{item} is not in list")
 
     def clear(self) -> None:
