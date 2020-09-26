@@ -365,7 +365,12 @@ class _Lazy:
         return False
 
     def __add__(self, other):
+        if isinstance(other, _Lazy):
+            other = other.eager()
         return self.eager().__add__(other)
+
+    def __radd__(self, other):
+        return other.__add__(self.eager())
 
     def __contains__(self, item) -> bool:
         return self.eager().__contains__(item)

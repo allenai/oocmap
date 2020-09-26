@@ -182,6 +182,12 @@ def test_oocmap_tuple():
                 lambda: item in t,
                 lambda: item in m[0])
 
+        # LazyTuple.__add__()
+        assert m[999] + ("Yoko",) == ("Paul", "Ringo", "George", "John Winston Ono Lennon", "Yoko")
+        assert ("Yoko",) + m[999] == ("Yoko", "Paul", "Ringo", "George", "John Winston Ono Lennon")
+        assert m[999] + m[0] == ("Paul", "Ringo", "George", "John Winston Ono Lennon") + t
+        assert m[0] + m[999] == t + ("Paul", "Ringo", "George", "John Winston Ono Lennon")
+
 
 def test_oocmap_dict():
     with tempfile.NamedTemporaryFile() as f:
