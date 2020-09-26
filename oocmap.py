@@ -109,10 +109,11 @@ class OOCMap(object):
         write_to_db: bool = True
     ) -> bytes:
         encoded_hash = blake2s(encoded).digest()[:8]
-        if write_to_db:
-            with self.lmdb_env.begin(write=True, db=db) as txn:
-                new_item = txn.put(encoded_hash, encoded, overwrite=False)
-                assert new_item, "hash collision?"
+        with self.lmdb_env.begin(write=write_to_db, db=db) as txn:
+            if write_to_db:
+                txn.put(encoded_hash, encoded, overwrite=False)
+            else:
+                assert txn.get(encoded_hash) is not None
         return encoded_hash
 
     def _encode(self, b: bytearray, v: Any, write_to_db: bool = True) -> None:
