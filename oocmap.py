@@ -452,6 +452,11 @@ class LazyTuple(_Lazy):
                 elements.append(self.ooc._decode(encoded_item))
         return tuple(elements)
 
+    def __hash__(self):
+        # This is not efficient, but we need this to hash the same way as the corresponding
+        # eager object, so that they will compare equal when they are used as dictionary keys.
+        return hash(self.eager())
+
     def __contains__(self, item) -> bool:
         if isinstance(item, _Lazy) and id(item.ooc) != id(self.ooc):
             return False
