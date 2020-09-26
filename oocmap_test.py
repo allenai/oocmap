@@ -182,6 +182,32 @@ def test_oocmap_tuple():
                 lambda: item in t,
                 lambda: item in m[0])
 
+
+def test_oocmap_dict():
+    with tempfile.NamedTemporaryFile() as f:
+        m = OOCMap(f.name, max_size=SMALL_MAP)
+        m[999] = ("Paul", "Ringo", "George", "John Winston Ono Lennon")
+
+        d = {
+            1: "uno",
+            "two": (2, "zwei", [2, 2]),
+            (3, 3, "drei"): {
+                "north": ("u", "p"),
+                "east": ["right"],
+                "south": "I come from a land down under!",
+                "west": m[999]
+            },
+            m[999]: "beatles",
+            (1,): "null"
+        }
+        m[0] = d
+        assert m[0] == d
+        assert d == m[0]
+
+        # LazyDict.__len__()
+        assert len(m[0]) == len(d)
+
+
 def test_two_oocmaps():
     with tempfile.NamedTemporaryFile() as f1:
         m1 = OOCMap(f1.name, max_size=SMALL_MAP)
