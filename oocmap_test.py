@@ -198,7 +198,10 @@ def test_oocmap_dict():
                 "west": m[999]
             },
             m[999]: "beatles",
-            (1,): "null"
+            (1,): "null",
+            (1,(1,)): "bull",
+            (1,(2,)): "troll",
+            (1,(m[999],)): "quell"
         }
         m[0] = d
         assert m[0] == d
