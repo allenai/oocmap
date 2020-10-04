@@ -1,4 +1,5 @@
 import codecs
+import io
 import random
 import struct
 from contextlib import contextmanager
@@ -6,6 +7,7 @@ from hashlib import blake2s
 from os import PathLike
 from typing import *
 
+import dill
 import lmdb
 import os
 
@@ -46,6 +48,7 @@ def _hardcoded_decoding(b: bytes) -> Any:
 def _random_bytes(n: int) -> bytes:
     return bytes(random.getrandbits(8) for _ in range(n))
 
+
 class OOCMap(object):
     def __init__(self, filename: Union[str, PathLike], *, max_size: int = 1024*1024*1024*1024):
         self.lmdb_env = lmdb.open(
@@ -54,7 +57,7 @@ class OOCMap(object):
             map_size=max_size,
             max_readers=os.cpu_count() * 2,
             max_spare_txns=os.cpu_count() * 2,
-            max_dbs=6,
+            max_dbs=7,
             writemap=False,
             metasync=False,
             sync=True,
@@ -78,6 +81,9 @@ class OOCMap(object):
         self.dicts_db = self.lmdb_env.open_db(
             b"dicts",
             integerkey=False)
+        self.pickles_db = self.lmdb_env.open_db(
+            b"pickles",
+            integerkey=True)
 
         self.ids_written_this_transaction = {}
         self.transaction_count = 0
@@ -116,7 +122,47 @@ class OOCMap(object):
                 assert txn.get(encoded_hash) is not None
         return encoded_hash
 
-    def _encode(self, b: bytearray, v: Any, write_to_db: bool = True) -> None:
+    class _FallbackDisabledError(Exception):
+        pass
+
+    class _FallbackPickler(dill.Pickler):
+        def __init__(self, buffer, oocmap: 'OOCMap'):
+            super().__init__(buffer)
+            self._oocmap = oocmap
+
+        def persistent_id(self, obj: Any) -> Optional[bytes]:
+            if isinstance(obj, bytes):
+                return None
+            encoded = bytearray()
+            try:
+                self._oocmap._encode(encoded, obj, True, fallback_to_pickle=False)
+            except self._oocmap._FallbackDisabledError:
+                return None
+            return bytes(encoded)
+
+    class _FallbackUnpickler(dill.Unpickler):
+        def __init__(self, buffer, oocmap: 'OOCMap'):
+            super().__init__(buffer)
+            self._oocmap = oocmap
+
+        def persistent_load(self, pid: Any) -> Any:
+            if isinstance(pid, bytes):
+                unpickled = self._oocmap._decode(pid)
+                if isinstance(unpickled, _Lazy):
+                    return unpickled
+                else:
+                    return unpickled
+            else:
+                raise ValueError("Unexpected object to unpickle.")
+
+    def _encode(
+        self,
+        b: bytearray,
+        v: Any,
+        write_to_db: bool = True,
+        *,
+        fallback_to_pickle: bool = True
+    ) -> None:
         """Encodes the value v into the bytearray b.
         This will always add exactly 9 bytes to b."""
 
@@ -225,8 +271,28 @@ class OOCMap(object):
 
             b.append(LazyDict.TYPE_CODE)                # type code for dict
             b.extend(key + b"\x00\x00\x00\x00")
+        elif fallback_to_pickle:
+            # Fallback to using pickle (or dill, rather)
+            if not write_to_db:
+                raise ValueError("Can't encode mutable values without writing to the db.")
+
+            # pickle the value to a buffer
+            with io.BytesIO() as buffer:
+                pickler = self._FallbackPickler(buffer, self)
+                pickler.dump(v)
+                encoded = buffer.getvalue()
+
+            # write the buffer to the db
+            with self.lmdb_env.begin(write=True, db=self.pickles_db) as txn:
+                key = _random_bytes(8)
+                while txn.get(key) is not None:
+                    key = _random_bytes(8)
+                txn.put(key, encoded)
+
+            b.append(12)        # type code for fallbacks
+            b.extend(key)
         else:
-            raise NotImplementedError("This type is not supported.")
+            raise self._FallbackDisabledError()
 
         assert len(b) == length_before + 9
 
@@ -265,6 +331,13 @@ class OOCMap(object):
             return LazyTuple(self, encoded)
         elif type_code == LazyDict.TYPE_CODE:
             return LazyDict(self, encoded[:4])
+        elif type_code == 12:
+            # pickle fallback
+            with self.lmdb_env.begin(write=False, db=self.pickles_db) as txn:
+                encoded_value = txn.get(encoded)
+            with io.BytesIO(encoded_value) as buffer:
+                unpickler = self._FallbackUnpickler(buffer, self)
+                return unpickler.load()
         else:
             raise ValueError(f"Unknown type code {type_code}")
 
@@ -341,7 +414,7 @@ class OOCMap(object):
 
 
 class _Lazy:
-    __slots__ = ["ooc", "key"]
+    #__slots__ = ["ooc", "key"]
     TYPE_CODE = NotImplemented
 
     def __init__(self, ooc: OOCMap, key: bytes):
@@ -668,7 +741,7 @@ class LazyList(_Lazy):
             txn.put(self.key, (index+1).to_bytes(4, _BYTEORDER, signed=False))
 
 
-class LazyDict(_Lazy):
+class LazyDict(_Lazy, dict):
     # TODO: implement more dict methods
     TYPE_CODE = 11
 

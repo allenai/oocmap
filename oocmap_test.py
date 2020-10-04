@@ -1,4 +1,5 @@
 import tempfile
+from typing import List
 
 import pytest
 
@@ -217,6 +218,42 @@ def test_oocmap_dict():
         assert len(m[0]) == len(d)
 
 
+class EmptyCustomClass:
+    def __eq__(self, other):
+        return isinstance(other, EmptyCustomClass)
+
+class CustomClass:
+    def __init__(self, string_value: str, list_value: List[str]):
+        self.string_value = string_value
+        self.list_value = list_value
+
+    def list_appended_to_strings(self):
+        return [x + self.string_value for x in self.list_value]
+
+    def __eq__(self, other):
+        if isinstance(other, CustomClass):
+            return self.string_value == other.string_value and self.list_value == other.list_value
+        else:
+            return False
+
+
+def test_oocmap_fallback():
+    with tempfile.NamedTemporaryFile() as f:
+        m = OOCMap(f.name, max_size=SMALL_MAP)
+
+        #b00 = EmptyCustomClass()
+        bea = CustomClass("Beatles", ["John", "Ringo", "Paul", "George"])
+        #bee = CustomClass("Beetles", ["Ladybird", "Scarab", "Stag", "Skin Beetles"])
+
+        #m[-1] = b00
+        m[0] = bea
+        #m[1] = bee
+
+        #assert m[-1] == b00
+        assert m[0] == bea
+        #assert m[1] == bee
+
+
 def test_two_oocmaps():
     with tempfile.NamedTemporaryFile() as f1:
         m1 = OOCMap(f1.name, max_size=SMALL_MAP)
@@ -230,4 +267,4 @@ def test_two_oocmaps():
             assert m2[0] == [["one", "two", "three"], ["eins", "zwei", "drei"], ["一", "二", "三"]]
 
 
-
+# TODO: Lists and dicts that contain themselves

@@ -1,3 +1,4 @@
 lmdb
 mmh3
 pytest
+dill
