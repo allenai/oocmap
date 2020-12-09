@@ -46,6 +46,18 @@ def _hardcoded_decoding(b: bytes) -> Any:
 def _random_bytes(n: int) -> bytes:
     return bytes(random.getrandbits(8) for _ in range(n))
 
+
+class CantEncodeError(ValueError):
+    """Raised if we cannot encode a value."""
+    pass
+
+class CantEncodeMutableError(CantEncodeError):
+    pass
+
+class CantEncodeImmutableError(CantEncodeError):
+    pass
+
+
 class OOCMap(object):
     def __init__(self, filename: Union[str, PathLike], *, max_size: int = 1024*1024*1024*1024):
         self.lmdb_env = lmdb.open(
@@ -112,11 +124,17 @@ class OOCMap(object):
         with self.lmdb_env.begin(write=write_to_db, db=db) as txn:
             if write_to_db:
                 txn.put(encoded_hash, encoded, overwrite=False)
-            else:
-                assert txn.get(encoded_hash) is not None
+            elif txn.get(encoded_hash) is None:
+                raise CantEncodeImmutableError("An immutable value wasn't already in the db, and the db is read-only.")
         return encoded_hash
 
-    def _encode(self, b: bytearray, v: Any, write_to_db: bool = True) -> None:
+    def _encode(
+        self,
+        b: bytearray,
+        v: Any,
+        write_to_db: bool = True,
+        fail_on_mutable: bool = False
+    ) -> None:
         """Encodes the value v into the bytearray b.
         This will always add exactly 9 bytes to b."""
 
@@ -177,8 +195,8 @@ class OOCMap(object):
             b.append(LazyTuple.TYPE_CODE)                   # type code for non-empty tuple
             b.extend(h)
         elif isinstance(v, list):
-            if not write_to_db:
-                raise ValueError("Can't encode mutable values without writing to the db.")
+            if fail_on_mutable or not write_to_db:
+                raise CantEncodeMutableError("Can't encode mutable values without writing to the db.")
 
             # Encode all the list items up front so we don't create a mega
             # transaction for a mega list.
@@ -202,8 +220,8 @@ class OOCMap(object):
             b.append(LazyList.TYPE_CODE)                # type code for list
             b.extend(key)
         elif isinstance(v, dict):
-            if not write_to_db:
-                raise ValueError("Can't encode mutable values without writing to the db.")
+            if fail_on_mutable or not write_to_db:
+                raise CantEncodeMutableError("Can't encode mutable values without writing to the db.")
 
             # Encode keys and values up front so we don't create a mega
             # transaction for a mega dict.
@@ -275,11 +293,13 @@ class OOCMap(object):
             self.lmdb_env = None
 
     def __setitem__(self, key, value):
-        # If the key has mutable elements in it, and those elements change,
-        # the lookup will fail later.
         with self.transaction():
             encoded_key = bytearray()
-            self._encode(encoded_key, key)
+            try:
+                self._encode(encoded_key, key, fail_on_mutable=True)
+            except CantEncodeMutableError:
+                raise TypeError(f"unhashable type {str(type(key))}")
+
             encoded_value = bytearray()
             self._encode(encoded_value, value)
 
@@ -288,7 +308,14 @@ class OOCMap(object):
 
     def __getitem__(self, key):
         encoded_key = bytearray()
-        self._encode(encoded_key, key, write_to_db=False)
+
+        try:
+            self._encode(encoded_key, key, write_to_db=False)
+        except CantEncodeMutableError:
+            raise TypeError(f"unhashable type {str(type(key))}")
+        except CantEncodeImmutableError:
+            raise KeyError()
+
         with self.lmdb_env.begin(write=False, db=self.root_db, buffers=True) as txn:
             encoded_value = txn.get(encoded_key)
             if encoded_value is None:
@@ -298,7 +325,13 @@ class OOCMap(object):
 
     def __delitem__(self, key):
         encoded_key = bytearray()
-        self._encode(encoded_key, key, write_to_db=False)
+        try:
+            self._encode(encoded_key, key, write_to_db=False)
+        except CantEncodeMutableError:
+            raise TypeError(f"unhashable type {str(type(key))}")
+        except CantEncodeImmutableError:
+            raise KeyError()
+
         with self.lmdb_env.begin(write=True, db=self.root_db) as txn:
             deleted = txn.delete(encoded_key)
             # If this pointed to any other objects, they are now orphaned and
@@ -679,13 +712,61 @@ class LazyDict(_Lazy):
             return length
 
     def __getitem__(self, key):
+        if isinstance(key, _Lazy) and id(key.ooc) != id(self.ooc):
+            raise KeyError()
+
         key_encoded = bytearray(self.key)
-        self.ooc._encode(key_encoded, key, write_to_db=False)
+        try:
+            self.ooc._encode(key_encoded, key, write_to_db=False)
+        except CantEncodeMutableError:
+            raise TypeError(f"unhashable type {str(type(key))}")
+        except CantEncodeImmutableError:
+            raise KeyError()
+
         with self.ooc.lmdb_env.begin(write=False, db=self.ooc.dicts_db, buffers=True) as txn:
             value_encoded = txn.get(key_encoded)
             if value_encoded is None:
                 raise KeyError()
             return self.ooc._decode(value_encoded)
+
+    def __delitem__(self, key) -> None:
+        if isinstance(key, _Lazy) and id(key.ooc) != id(self.ooc):
+            raise KeyError()
+
+        key_encoded = bytearray(self.key)
+        try:
+            self.ooc._encode(key_encoded, key, write_to_db=False)
+        except CantEncodeMutableError:
+            raise TypeError(f"unhashable type {str(type(key))}")
+        except CantEncodeImmutableError:
+            raise KeyError()
+
+        with self.ooc.lmdb_env.begin(write=True, db=self.ooc.dicts_db, buffers=True) as txn:
+            deleted = txn.delete(key_encoded)
+            if deleted:
+                encoded_length = txn.get(self.key)
+                length = struct.unpack("<I", encoded_length)[0] - 1
+                assert length >= 0
+                txn.put(self.key, length.to_bytes(4, _BYTEORDER, signed=False))
+            else:
+                raise KeyError()
+
+    def __setitem__(self, key, value):
+        key_encoded = bytearray(self.key)
+        try:
+            self.ooc._encode(key_encoded, key, fail_on_mutable=True)
+        except CantEncodeMutableError:
+            raise TypeError(f"unhashable type {str(type(key))}")
+
+        value_encoded = bytearray()
+        self.ooc._encode(value_encoded, value)
+
+        with self.ooc.lmdb_env.begin(write=True, db=self.ooc.dicts_db) as txn:
+            old_value = txn.replace(key_encoded, value_encoded)
+            if old_value is None:
+                encoded_length = txn.get(self.key)
+                length = struct.unpack("<I", encoded_length)[0] + 1
+                txn.put(self.key, length.to_bytes(4, _BYTEORDER, signed=False))
 
     def eager(self) -> Dict:
         result = {}
@@ -700,3 +781,10 @@ class LazyDict(_Lazy):
                     key_encoded = key_encoded[len(self.key):]
                     result[self.ooc._decode(key_encoded)] = self.ooc._decode(value_encoded)
         return result
+
+    def __contains__(self, item) -> bool:
+        try:
+            self.__getitem__(item)
+            return True
+        except KeyError:
+            return False

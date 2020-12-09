@@ -216,6 +216,48 @@ def test_oocmap_dict():
         # LazyDict.__len__()
         assert len(m[0]) == len(d)
 
+        # LazyDict.__getitem__()
+        for key in list(d.keys()) + ["notfound", [1,2,3]]:
+            assert_equal_including_exceptions(
+                lambda: d[key],
+                lambda: m[0][key])
+
+        # LazyDict,__setitem__()
+        for key in [2, "three", [1,2,3], 1]:
+            def assign_d():
+                d[key] = None
+            def assign_m():
+                m[0][key] = None
+            assert_equal_including_exceptions(assign_d, assign_m)
+        assert len(m[0]) == len(d)
+
+        # LazyDict.__getitem__() again
+        for key in list(d.keys()) + ["notfound", [1,2,3]]:
+            assert_equal_including_exceptions(
+                lambda: d[key],
+                lambda: m[0][key])
+
+        # LazyDict.__delitem__()
+        for key in [2, "three", [1,2,3], 1]:
+            def delitem_d():
+                del d[key]
+            def delitem_m():
+                del m[0][key]
+            assert_equal_including_exceptions(delitem_d, delitem_m)
+        assert len(m[0]) == len(d)
+
+        # LazyDict.__getitem__() again
+        for key in list(d.keys()) + ["notfound", [1,2,3]]:
+            assert_equal_including_exceptions(
+                lambda: d[key],
+                lambda: m[0][key])
+
+        # LazyDict.__contains__()
+        for item in list(d.keys()) + ["notfound"]:
+            assert_equal_including_exceptions(
+                lambda: item in d,
+                lambda: item in m[0])
+
 
 def test_two_oocmaps():
     with tempfile.NamedTemporaryFile() as f1:
