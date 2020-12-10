@@ -52,7 +52,9 @@ class CantEncodeError(ValueError):
     pass
 
 class CantEncodeMutableError(CantEncodeError):
-    pass
+    def __init__(self, type_to_blame, message: str):
+        super().__init__(message)
+        self.type_to_blame = type_to_blame
 
 class CantEncodeImmutableError(CantEncodeError):
     pass
@@ -196,7 +198,7 @@ class OOCMap(object):
             b.extend(h)
         elif isinstance(v, list):
             if fail_on_mutable or not write_to_db:
-                raise CantEncodeMutableError("Can't encode mutable values without writing to the db.")
+                raise CantEncodeMutableError(list, "Can't encode mutable values without writing to the db.")
 
             # Encode all the list items up front so we don't create a mega
             # transaction for a mega list.
@@ -221,7 +223,7 @@ class OOCMap(object):
             b.extend(key)
         elif isinstance(v, dict):
             if fail_on_mutable or not write_to_db:
-                raise CantEncodeMutableError("Can't encode mutable values without writing to the db.")
+                raise CantEncodeMutableError(dict, "Can't encode mutable values without writing to the db.")
 
             # Encode keys and values up front so we don't create a mega
             # transaction for a mega dict.
@@ -297,8 +299,8 @@ class OOCMap(object):
             encoded_key = bytearray()
             try:
                 self._encode(encoded_key, key, fail_on_mutable=True)
-            except CantEncodeMutableError:
-                raise TypeError(f"unhashable type {str(type(key))}")
+            except CantEncodeMutableError as e:
+                raise TypeError(f"unhashable type {str(e.type_to_blame)}")
 
             encoded_value = bytearray()
             self._encode(encoded_value, value)
@@ -311,8 +313,8 @@ class OOCMap(object):
 
         try:
             self._encode(encoded_key, key, write_to_db=False)
-        except CantEncodeMutableError:
-            raise TypeError(f"unhashable type {str(type(key))}")
+        except CantEncodeMutableError as e:
+            raise TypeError(f"unhashable type {str(e.type_to_blame)}")
         except CantEncodeImmutableError:
             raise KeyError()
 
@@ -327,8 +329,8 @@ class OOCMap(object):
         encoded_key = bytearray()
         try:
             self._encode(encoded_key, key, write_to_db=False)
-        except CantEncodeMutableError:
-            raise TypeError(f"unhashable type {str(type(key))}")
+        except CantEncodeMutableError as e:
+            raise TypeError(f"unhashable type {str(e.type_to_blame)}")
         except CantEncodeImmutableError:
             raise KeyError()
 
@@ -436,7 +438,7 @@ class _Lazy:
         return self.eager().__lt__(other)
 
     def __hash__(self):
-        return hash((self.ooc, self.key))
+        return hash((self.ooc, self.key, self.TYPE_CODE))
 
     def __mul__(self, other):
         return self.eager().__mul__(other)
@@ -718,8 +720,8 @@ class LazyDict(_Lazy):
         key_encoded = bytearray(self.key)
         try:
             self.ooc._encode(key_encoded, key, write_to_db=False)
-        except CantEncodeMutableError:
-            raise TypeError(f"unhashable type {str(type(key))}")
+        except CantEncodeMutableError as e:
+            raise TypeError(f"unhashable type {str(e.type_to_blame)}")
         except CantEncodeImmutableError:
             raise KeyError()
 
@@ -736,8 +738,8 @@ class LazyDict(_Lazy):
         key_encoded = bytearray(self.key)
         try:
             self.ooc._encode(key_encoded, key, write_to_db=False)
-        except CantEncodeMutableError:
-            raise TypeError(f"unhashable type {str(type(key))}")
+        except CantEncodeMutableError as e:
+            raise TypeError(f"unhashable type {str(e.type_to_blame)}")
         except CantEncodeImmutableError:
             raise KeyError()
 
@@ -755,8 +757,8 @@ class LazyDict(_Lazy):
         key_encoded = bytearray(self.key)
         try:
             self.ooc._encode(key_encoded, key, fail_on_mutable=True)
-        except CantEncodeMutableError:
-            raise TypeError(f"unhashable type {str(type(key))}")
+        except CantEncodeMutableError as e:
+            raise TypeError(f"unhashable type {str(e.type_to_blame)}")
 
         value_encoded = bytearray()
         self.ooc._encode(value_encoded, value)
@@ -767,6 +769,18 @@ class LazyDict(_Lazy):
                 encoded_length = txn.get(self.key)
                 length = struct.unpack("<I", encoded_length)[0] + 1
                 txn.put(self.key, length.to_bytes(4, _BYTEORDER, signed=False))
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def items(self):
+        return LazyDictItems(self)
+
+    def keys(self):
+        return LazyDictKeys(self)
+
+    def values(self):
+        return LazyDictValues(self)
 
     def eager(self) -> Dict:
         result = {}
@@ -783,8 +797,158 @@ class LazyDict(_Lazy):
         return result
 
     def __contains__(self, item) -> bool:
+        if isinstance(item, _Lazy) and id(item.ooc) != id(self.ooc):
+            return False
+
+        key_encoded = bytearray(self.key)
         try:
-            self.__getitem__(item)
-            return True
+            self.ooc._encode(key_encoded, item, write_to_db=False)
+        except CantEncodeMutableError as e:
+            raise TypeError(f"unhashable type {str(e.type_to_blame)}")
+        except CantEncodeImmutableError:
+            return False
+
+        with self.ooc.lmdb_env.begin(write=False, db=self.ooc.dicts_db, buffers=True) as txn:
+            value_encoded = txn.get(key_encoded)
+            return value_encoded is not None
+
+
+class LazyDictItems(_Lazy):
+    TYPE_CODE = 12
+
+    def __init__(self, d: LazyDict):
+        super().__init__(d.ooc, d.key)
+        self.d = d
+
+    def __contains__(self, item) -> bool:
+        if isinstance(item, LazyTuple):
+            item = item.eager()
+        if not isinstance(item, tuple):
+            return False
+        item_key, item_value = item
+
+        try:
+            stored_value = self.d[item_key]
         except KeyError:
             return False
+        return stored_value == item_value
+
+    def __iter__(self):
+        ooc = self.ooc
+        class LazyDictItemsIter(Iterator):
+            def __init__(self, dict_key: bytes):
+                self.current_key = dict_key
+                self.key_prefix = dict_key
+
+            def __next__(self):
+                if self.current_key is None:
+                    raise StopIteration()
+
+                with ooc.lmdb_env.begin(write=False, buffers=True) as txn:
+                    with txn.cursor(ooc.dicts_db) as cur:
+                        success = cur.set_key(self.current_key)
+                        assert success
+                        success = cur.next()
+                        if not success:
+                            raise StopIteration()
+                        self.current_key, value_encoded = cur.item()
+                        if self.current_key[:len(self.key_prefix)] != self.key_prefix:
+                            self.current_key = None
+                            raise StopIteration()
+                        key_encoded = self.current_key[len(self.key_prefix):]
+                        return ooc._decode(key_encoded), ooc._decode(value_encoded)
+
+        return LazyDictItemsIter(self.key)
+
+
+class LazyDictKeys(_Lazy):
+    TYPE_CODE = 13
+
+    def __init__(self, d: LazyDict):
+        super().__init__(d.ooc, d.key)
+        self.d = d
+
+    def __contains__(self, item) -> bool:
+        return self.d.__contains__(item)
+
+    def __iter__(self):
+        ooc = self.ooc
+        class LazyDictKeysIter(Iterator):
+            def __init__(self, dict_key: bytes):
+                self.current_key = dict_key
+                self.key_prefix = dict_key
+
+            def __next__(self):
+                if self.current_key is None:
+                    raise StopIteration()
+
+                with ooc.lmdb_env.begin(write=False, buffers=True) as txn:
+                    with txn.cursor(ooc.dicts_db) as cur:
+                        success = cur.set_key(self.current_key)
+                        assert success
+                        success = cur.next()
+                        if not success:
+                            raise StopIteration()
+                        self.current_key = cur.key()
+                        if self.current_key[:len(self.key_prefix)] != self.key_prefix:
+                            self.current_key = None
+                            raise StopIteration()
+                        key_encoded = self.current_key[len(self.key_prefix):]
+                        return ooc._decode(key_encoded)
+
+        return LazyDictKeysIter(self.key)
+
+
+class LazyDictValues(_Lazy):
+    TYPE_CODE = 14
+
+    def __init__(self, d: LazyDict):
+        super().__init__(d.ooc, d.key)
+        self.d = d
+
+    def __contains__(self, item) -> bool:
+        if isinstance(item, _Lazy) and id(item.ooc) != id(self.ooc):
+            return False
+
+        with self.ooc.lmdb_env.begin(write=False, buffers=True) as txn:
+            with txn.cursor(self.ooc.dicts_db) as cur:
+                success = cur.set_key(self.key)
+                assert success
+                while cur.next():
+                    key_encoded, value_encoded = cur.item()
+                    if key_encoded[:len(self.key)] != self.key:
+                        return False
+                    if isinstance(item, _Lazy):
+                        if item.TYPE_CODE == value_encoded[0] and item.key == value_encoded[1:]:
+                            return True
+                    else:
+                        element = self.ooc._decode(value_encoded)
+                        if item == element:
+                            return True
+        return False
+
+    def __iter__(self):
+        ooc = self.ooc
+        class LazyDictValuesIter(Iterator):
+            def __init__(self, dict_key: bytes):
+                self.current_key = dict_key
+                self.key_prefix = dict_key
+
+            def __next__(self):
+                if self.current_key is None:
+                    raise StopIteration()
+
+                with ooc.lmdb_env.begin(write=False, buffers=True) as txn:
+                    with txn.cursor(ooc.dicts_db) as cur:
+                        success = cur.set_key(self.current_key)
+                        assert success
+                        success = cur.next()
+                        if not success:
+                            raise StopIteration()
+                        self.current_key, value_encoded = cur.item()
+                        if self.current_key[:len(self.key_prefix)] != self.key_prefix:
+                            self.current_key = None
+                            raise StopIteration()
+                        return ooc._decode(value_encoded)
+
+        return LazyDictValuesIter(self.key)

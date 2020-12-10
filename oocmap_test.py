@@ -253,10 +253,34 @@ def test_oocmap_dict():
                 lambda: m[0][key])
 
         # LazyDict.__contains__()
-        for item in list(d.keys()) + ["notfound"]:
+        for item in list(d.keys()) + ["notfound", (1, [1,2,3])]:
             assert_equal_including_exceptions(
                 lambda: item in d,
                 lambda: item in m[0])
+
+        # LazyDict.__iter__()
+        for key in d:
+            assert key in m[0]
+        for key in m[0]:
+            assert key in d
+
+        # LazyDict.keys()
+        for key in d.keys():
+            assert key in m[0].keys()
+        for key in m[0].keys():
+            assert key in d.keys()
+
+        # LazyDict.values()
+        for value in d.values():
+            assert value in m[0].values()
+        for value in m[0].values():
+            assert value in d.values()
+
+        # LazyDict.items()
+        for item in d.items():
+            assert item in m[0].items()
+        for item in m[0].items():
+            assert item in d.items()
 
 
 def test_two_oocmaps():
