@@ -71,7 +71,7 @@ class OOCMap(object):
             max_dbs=6,
             writemap=False,
             metasync=False,
-            sync=True,
+            sync=False,     # This is technically unsafe, but nobody can wait for those syncs.
             meminit=False,
             map_async=False)
         self.root_db = self.lmdb_env.open_db(
