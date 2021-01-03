@@ -6,18 +6,19 @@ find_package(PythonLibs 3.7 REQUIRED)
 
 set(CMAKE_C_STANDARD 11)
 
-add_library(oocmap SHARED oocmap.c)
+add_library(oocmap SHARED
+        oocmap.c
+        mdb.c
+        midl.c)
 set_target_properties(
         oocmap
         PROPERTIES
         PREFIX ""
         OUTPUT_NAME "oocmap"
-        LINKER_LANGUAGE C
-)
+        LINKER_LANGUAGE C)
 target_include_directories(
         oocmap PUBLIC
-        ${PYTHON_INCLUDE_DIRS}
-)
+        ${PYTHON_INCLUDE_DIRS})
 
 # On Windows, it is required to link to the Python libraries
 if(WIN32)
