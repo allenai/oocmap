@@ -19,8 +19,4 @@ set_target_properties(
 target_include_directories(
         oocmap PUBLIC
         ${PYTHON_INCLUDE_DIRS})
-
-# On Windows, it is required to link to the Python libraries
-if(WIN32)
-    target_link_libraries(oocmap ${PYTHON_LIBRARIES})
-endif()
+target_link_libraries(oocmap ${PYTHON_LIBRARIES})
