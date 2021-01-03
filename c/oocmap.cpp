@@ -87,7 +87,6 @@ static int OOCMap_init(OOCMapObject* self, PyObject* args, PyObject* kwds) {
     return 0;
 }
 
-
 static PyTypeObject OOCMapType = {
         PyVarObject_HEAD_INIT(nullptr, 0)
         .tp_name = "oocmap.OOCMap",
