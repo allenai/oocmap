@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.17)
 project(oocmap)
 
-find_package(PythonInterp 3.7 REQUIRED)
-find_package(PythonLibs 3.7 REQUIRED)
+find_package(PythonInterp 3 REQUIRED)
+find_package(PythonLibs 3 REQUIRED)
 
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 
 add_library(oocmap SHARED
-        oocmap.c
+        oocmap.cpp
         mdb.c
         midl.c)
 set_target_properties(
@@ -19,8 +20,4 @@ set_target_properties(
 target_include_directories(
         oocmap PUBLIC
         ${PYTHON_INCLUDE_DIRS})
-
-# On Windows, it is required to link to the Python libraries
-if(WIN32)
-    target_link_libraries(oocmap ${PYTHON_LIBRARIES})
-endif()
+target_link_libraries(oocmap ${PYTHON_LIBRARIES})
