@@ -1,37 +1,41 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include <unordered_map>
 #include "lmdb.h"
 
 static PyObject* oocmap_test(PyObject* const self, PyObject* const args) {
     Py_RETURN_NONE;
 }
 
+typedef std::unordered_map<unsigned int, unsigned char[9]> Id2EncodedMap;
+
 typedef struct {
     PyObject_HEAD
     MDB_env* mdb;
     size_t currentMapSize;
+    Id2EncodedMap idsWrittenThisTransaction;
     unsigned int transactionCount;
 } OOCMapObject;
 
 static void OOCMap_dealloc(OOCMapObject* self) {
     mdb_env_close(self->mdb);
-    //(&self->idsWrittenThisTransaction)->~Id2EncodedMap();   // explicit destructor because this was created with placement new
+    (&self->idsWrittenThisTransaction)->~Id2EncodedMap();   // explicit destructor because this was created with placement new
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
 static PyObject* OOCMap_new(PyTypeObject* type, PyObject* args, PyObject* kwds) {
     OOCMapObject* self = (OOCMapObject*)type->tp_alloc(type, 0);
-    if(self != NULL) {
+    if(self != nullptr) {
         mdb_env_create(&self->mdb);
-        //new(&self->idsWrittenThisTransaction) Id2EncodedMap();  // placement new
+        new(&self->idsWrittenThisTransaction) Id2EncodedMap();  // placement new
     }
     return (PyObject*)self;
 }
 
 static int OOCMap_init(OOCMapObject* self, PyObject* args, PyObject* kwds) {
     // parse parameters
-    static char *kwlist[] = {"filename", NULL};
-    PyObject* filenameObject = NULL;
+    static char *kwlist[] = {"filename", nullptr};
+    PyObject* filenameObject = nullptr;
     const int parseSuccess = PyArg_ParseTupleAndKeywords(
             args,
             kwds,
@@ -84,7 +88,7 @@ static int OOCMap_init(OOCMapObject* self, PyObject* args, PyObject* kwds) {
 }
 
 static PyTypeObject OOCMapType = {
-        PyVarObject_HEAD_INIT(NULL, 0)
+        PyVarObject_HEAD_INIT(nullptr, 0)
         .tp_name = "oocmap.OOCMap",
         .tp_basicsize = sizeof(OOCMapObject),
         .tp_itemsize = 0,
@@ -97,7 +101,7 @@ static PyTypeObject OOCMapType = {
 
 static PyMethodDef OocmapMethods[] = {
     {"test", oocmap_test, METH_VARARGS, "Make sure the extension module works"},
-    {NULL, NULL, 0, NULL}        /* Sentinel */
+    {nullptr, nullptr, 0, nullptr}        /* Sentinel */
 };
 
 static struct PyModuleDef oocmap_module = {
@@ -110,17 +114,17 @@ static struct PyModuleDef oocmap_module = {
 
 PyMODINIT_FUNC PyInit_oocmap(void) {
     if(PyType_Ready(&OOCMapType) < 0)
-        return NULL;
+        return nullptr;
 
     PyObject* const m = PyModule_Create(&oocmap_module);
-    if(m == NULL)
-        return NULL;
+    if(m == nullptr)
+        return nullptr;
 
     Py_INCREF(&OOCMapType);
     if(PyModule_AddObject(m, "OOCMap", (PyObject*)&OOCMapType) < 0) {
         Py_DECREF(&OOCMapType);
         Py_DECREF(m);
-        return NULL;
+        return nullptr;
     }
 
     return m;

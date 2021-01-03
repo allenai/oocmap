@@ -5,9 +5,10 @@ find_package(PythonInterp 3.7 REQUIRED)
 find_package(PythonLibs 3.7 REQUIRED)
 
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 
 add_library(oocmap SHARED
-        oocmap.c
+        oocmap.cpp
         mdb.c
         midl.c)
 set_target_properties(
