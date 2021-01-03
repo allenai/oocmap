@@ -41,7 +41,7 @@ static int OOCMap_init(OOCMapObject* self, PyObject* args, PyObject* kwds) {
             kwds,
             "O&",
             const_cast<char**>(kwlist),
-            &filenameObject, PyUnicode_FSConverter);
+            PyUnicode_FSConverter, &filenameObject);
     if(!parseSuccess)
         return -1;
     const char* filename = PyBytes_AS_STRING(filenameObject);
