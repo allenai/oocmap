@@ -15,13 +15,10 @@ typedef struct {
     MDB_dbi tuplesDb;
     MDB_dbi dictsDb;
     size_t currentMapSize;
-    Id2EncodedMap idsWrittenThisTransaction;
-    unsigned int transactionCount;
 } OOCMapObject;
 
 static void OOCMap_dealloc(OOCMapObject* self) {
     mdb_env_close(self->mdb);
-    (&self->idsWrittenThisTransaction)->~Id2EncodedMap();   // explicit destructor because this was created with placement new
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -30,7 +27,6 @@ static PyObject* OOCMap_new(PyTypeObject* type, PyObject* args, PyObject* kwds) 
     if(self != nullptr) {
         mdb_env_create(&self->mdb);
         mdb_env_set_maxdbs(self->mdb, 6);
-        new(&self->idsWrittenThisTransaction) Id2EncodedMap();  // placement new
     }
     return (PyObject*)self;
 }
@@ -143,17 +139,34 @@ static MDB_dbi* open_db(MDB_txn* const txn, const char* const name, unsigned int
 
 static int OOCMap_init(OOCMapObject* self, PyObject* args, PyObject* kwds) {
     // parse parameters
-    static const char *kwlist[] = {"filename", nullptr};
+    static const char *kwlist[] = {"filename", "mapsize", nullptr};
     PyObject* filenameObject = nullptr;
+    unsigned long long mapsize = 0;
     const int parseSuccess = PyArg_ParseTupleAndKeywords(
             args,
             kwds,
-            "O&",
+            "O&|$K",
             const_cast<char**>(kwlist),
-            PyUnicode_FSConverter, &filenameObject);
+            PyUnicode_FSConverter, &filenameObject, &mapsize);
     if(!parseSuccess)
         return -1;
     const char* filename = PyBytes_AS_STRING(filenameObject);
+
+    // set mapsize
+    if(mapsize == 0) mapsize = 1024ull * 1024ull * 1024ull * 1024ull;
+    const int setMapsizeError = mdb_env_set_mapsize(self->mdb, mapsize);
+    switch(setMapsizeError) {
+        case 0:
+            break;
+        case EINVAL:
+            PyErr_Format(PyExc_IOError, "LMDB Error: An invalid parameter was specified.");
+            Py_XDECREF(filenameObject);
+            return -1;
+        default:
+            PyErr_Format(PyExc_IOError, "Unknown LMDB error %d", setMapsizeError);
+            Py_XDECREF(filenameObject);
+            return -1;
+    }
 
     // open lmdb
     // TODO: We should check for and handle the case where self->mdb has already been opened.
@@ -229,51 +242,31 @@ static int OOCMap_init(OOCMapObject* self, PyObject* args, PyObject* kwds) {
             return -1;
     }
 
-    self->idsWrittenThisTransaction.clear();
-    self->transactionCount = 0;
-
     return 0;
 }
 
-// TODO: we might not need this
-static PyObject* OOCMap_begin_transaction(OOCMapObject* self, PyObject* unused) {
-    if(self->transactionCount <= 0)
-        self->idsWrittenThisTransaction.clear();
-    self->transactionCount += 1;
-    return Py_None;
-}
-
-// TODO: we might not need this
-static PyObject* OOCMap_end_transaction(OOCMapObject* self, PyObject* unused) {
-    if(self->transactionCount <= 0)
-        return PyErr_Format(PyExc_ValueError, "No transaction running.");
-    self->transactionCount -= 1;
-    if(self->transactionCount <= 0)
-        self->idsWrittenThisTransaction.clear();
-    return Py_None;
-}
-
-static Py_ssize_t OOCMap_length(PyObject* self);
-
 static PyMethodDef OOCMap_methods[] = {
-        {
-            "begin_transaction",
-            (PyCFunction)OOCMap_begin_transaction,
-            METH_NOARGS,
-            PyDoc_STR("start a transaction")
-        },{
-            "end_transaction",
-            (PyCFunction)OOCMap_end_transaction,
-            METH_NOARGS,
-            PyDoc_STR("end a transaction")
-        },
+// We're not using these anymore, but I'm leaving the code here as an example.
+//        {
+//            "begin_transaction",
+//            (PyCFunction)OOCMap_begin_transaction,
+//            METH_NOARGS,
+//            PyDoc_STR("start a transaction")
+//        },{
+//            "end_transaction",
+//            (PyCFunction)OOCMap_end_transaction,
+//            METH_NOARGS,
+//            PyDoc_STR("end a transaction")
+//        },
         {nullptr}, // sentinel
 };
 
+static Py_ssize_t OOCMap_length(PyObject* pySelf);
+static int OOCMap_insert(PyObject* pySelf, PyObject* key, PyObject* value);
 static PyMappingMethods OOCMap_mapping_methods = {
         .mp_length = OOCMap_length,
         .mp_subscript = nullptr,
-        .mp_ass_subscript = nullptr
+        .mp_ass_subscript = OOCMap_insert
 };
 
 static PyTypeObject OOCMapType = {
@@ -311,6 +304,69 @@ static Py_ssize_t OOCMap_length(PyObject* pySelf) {
     return stat.ms_entries;
 }
 
+static int OOCMap_insert(PyObject* pySelf, PyObject* key, PyObject* value) {
+    // cast the input
+    if(pySelf->ob_type != &OOCMapType) {
+        PyErr_BadArgument();
+        return -1;
+    }
+    const auto self = reinterpret_cast<OOCMapObject*>(pySelf);
+
+    // start transaction
+    MDB_txn* txn = txn_begin(self, true);
+    if(txn == nullptr)
+        return -1;
+
+    // encode the key
+    Id2EncodedMap alreadyInsertedItems;
+    unsigned char encoded_key[9];
+    if(!OOCMap_encode(self, key, encoded_key)) {
+        mdb_txn_abort(txn);
+        return -1;
+    }
+
+    // put the key into the db, so we get a place to put the value
+    MDB_val mdbKey {.mv_size=sizeof(encoded_key), .mv_data=encoded_key};
+    MDB_val mdbData {.mv_size=sizeof(encoded_key), .mv_data=nullptr};
+    while(true) {
+        const int error = mdb_put(
+                txn, self->rootDb,
+                &mdbKey, &mdbData,
+                MDB_RESERVE);
+        if(error == 0)
+            break;
+
+        mdb_txn_abort(txn);
+        switch (error) {
+            case MDB_MAP_FULL:
+                PyErr_Format(PyExc_IOError,"LMDB: The database is full, see mdb_env_set_mapsize().");
+                return -1;
+            case MDB_TXN_FULL:
+                PyErr_Format(PyExc_IOError, "LMDB: The transaction has too many dirty pages.");
+                return -1;
+            case EACCES:
+                PyErr_Format(PyExc_IOError, "LMDB: An attempt was made to write in a read-only transaction.");
+                return -1;
+            case EINVAL:
+                PyErr_Format(PyExc_IOError, "LMDB: An invalid parameter was specified.");
+                return -1;
+            default:
+                PyErr_Format(PyExc_IOError, "Unknown LMDB error %d", error);
+                return -1;
+        }
+    }
+
+    // write the value
+    if(!OOCMap_encode(self, value, mdbData.mv_data)) {
+        mdb_txn_abort(txn);
+        return -1;
+    }
+
+    if(!txn_commit(txn))
+        return -1;
+    return 0;
+}
+
 static struct PyModuleDef oocmap_module = {
     PyModuleDef_HEAD_INIT,
     "oocmap",   /* name of module */
@@ -336,4 +392,3 @@ PyMODINIT_FUNC PyInit_oocmap() {
 
     return m;
 }
-
