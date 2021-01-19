@@ -115,16 +115,6 @@ struct MdbError : OocError {
         case 0:
             PyErr_Format(PyExc_ValueError, "Error: There is no error.");
             break;
-        case MDB_PANIC:
-            PyErr_Format(
-                PyExc_IOError,
-                "LMDB: A fatal error occurred earlier and the environment must be shut down.");
-            break;
-        case MDB_READERS_FULL:
-            PyErr_Format(
-                PyExc_IOError,
-                "LMDB: A read-only transaction was requested and the reader lock table is full.");
-            break;
         case ENOMEM:
             PyErr_NoMemory();
             break;
@@ -137,22 +127,8 @@ struct MdbError : OocError {
         case EIO:
             PyErr_Format(PyExc_IOError,"LMDB: A low-level I/O error occurred while writing.");
             break;
-        case MDB_DBS_FULL:
-            PyErr_Format(PyExc_IOError,"LMDB: Too many databases have been opened.");
-            break;
-        case MDB_NOTFOUND:
-            PyErr_Format(
-                PyExc_IOError,
-                "LMDB: Database doesn't exist in the environment and MDB_CREATE was not specified.");
-            break;
         case EACCES:
             PyErr_Format(PyExc_IOError, "LMDB: Access denied");
-            break;
-        case MDB_VERSION_MISMATCH:
-            PyErr_Format(PyExc_IOError, "LMDB Error: The version of the LMDB library doesn't match the version that created the database environment.");
-            break;
-        case MDB_INVALID:
-            PyErr_Format(PyExc_IOError, "LMDB Error: The environment file headers are corrupted.");
             break;
         case ENOENT:
             PyErr_Format(PyExc_IOError, "LMDB Error: The directory specified by the path parameter doesn't exist.");
@@ -160,19 +136,8 @@ struct MdbError : OocError {
         case EAGAIN:
             PyErr_Format(PyExc_IOError, "LMDB Error: The environment was locked by another process.");
             break;
-        case MDB_MAP_FULL:
-            PyErr_Format(PyExc_IOError,"LMDB: The database is full, see mdb_env_set_mapsize().");
-            break;
-        case MDB_TXN_FULL:
-            PyErr_Format(PyExc_IOError, "LMDB: The transaction has too many dirty pages.");
-            break;
-        case MDB_MAP_RESIZED:
-            PyErr_Format(
-                PyExc_IOError,
-                "LMDB: Ran out of patience while resizing the memory map.");
-            break;
         default:
-            PyErr_Format(PyExc_IOError,"Unknown LMDB error %d", mdbErrorCode);
+            PyErr_Format(PyExc_IOError, "MDB Error: %s", mdb_strerror(mdbErrorCode));
             break;
         }
     }
