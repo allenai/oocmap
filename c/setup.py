@@ -5,7 +5,8 @@ oocmap_module = Extension(
     sources=[
         'oocmap.cpp',
         'mdb.c',
-        'midl.c'
+        'midl.c',
+        'spooky.cpp'
     ])
 
 setup(name='oocmap',
