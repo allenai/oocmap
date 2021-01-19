@@ -1230,7 +1230,7 @@ typedef struct MDB_xcursor {
 #define XCURSOR_INITED(mc) \
 	((mc)->mc_xcursor && ((mc)->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED))
 
-	/** Update the xcursor's sub-page pointer, if any, in \b mc.  Needed
+	/** update the xcursor's sub-page pointer, if any, in \b mc.  Needed
 	 *	when the node which contains the sub-page may have moved.  Called
 	 *	with leaf page \b mp = mc->mc_pg[\b top].
 	 */
@@ -1451,7 +1451,7 @@ static char *const mdb_errstr[] = {
 	"MDB_NOTFOUND: No matching key/data pair found",
 	"MDB_PAGE_NOTFOUND: Requested page not found",
 	"MDB_CORRUPTED: Located page was wrong type",
-	"MDB_PANIC: Update of meta page failed or environment had fatal error",
+	"MDB_PANIC: update of meta page failed or environment had fatal error",
 	"MDB_VERSION_MISMATCH: Database environment version mismatch",
 	"MDB_INVALID: File is not an LMDB file",
 	"MDB_MAP_FULL: Environment mapsize limit reached",
@@ -2432,7 +2432,7 @@ mdb_page_touch(MDB_cursor *mc)
 			mp->mp_pgno, pgno));
 		mdb_cassert(mc, mp->mp_pgno != pgno);
 		mdb_midl_xappend(txn->mt_free_pgs, mp->mp_pgno);
-		/* Update the parent page, if any, to point to the new page */
+		/* update the parent page, if any, to point to the new page */
 		if (mc->mc_top) {
 			MDB_page *parent = mc->mc_pg[mc->mc_top-1];
 			MDB_node *node = NODEPTR(parent, mc->mc_ki[mc->mc_top-1]);
@@ -2963,7 +2963,7 @@ mdb_dbis_update(MDB_txn *txn, int keep)
 		env->me_numdbs = n;
 }
 
-/** End a transaction, except successful commit of a nested transaction.
+/** end a transaction, except successful commit of a nested transaction.
  * May be called twice for readonly txns: First reset it, then abort.
  * @param[in] txn the transaction handle to end
  * @param[in] mode why and how to end the transaction
@@ -3493,7 +3493,7 @@ mdb_txn_commit(MDB_txn *txn)
 		/* Merge our cursors into parent's and close them */
 		mdb_cursors_close(txn, 1);
 
-		/* Update parent's DB table. */
+		/* update parent's DB table. */
 		memcpy(parent->mt_dbs, txn->mt_dbs, txn->mt_numdbs * sizeof(MDB_db));
 		parent->mt_numdbs = txn->mt_numdbs;
 		parent->mt_dbflags[FREE_DBI] = txn->mt_dbflags[FREE_DBI];
@@ -3617,7 +3617,7 @@ mdb_txn_commit(MDB_txn *txn)
 	DPRINTF(("committing txn %"Z"u %p on mdbenv %p, root page %"Z"u",
 	    txn->mt_txnid, (void*)txn, (void*)env, txn->mt_dbs[MAIN_DBI].md_root));
 
-	/* Update DB root pointers */
+	/* update DB root pointers */
 	if (txn->mt_numdbs > CORE_DBS) {
 		MDB_cursor mc;
 		MDB_dbi i;
@@ -3800,7 +3800,7 @@ mdb_env_init_meta(MDB_env *env, MDB_meta *meta)
 	return rc;
 }
 
-/** Update the environment info to commit a transaction.
+/** update the environment info to commit a transaction.
  * @param[in] txn the transaction that's being committed
  * @return 0 on success, non-zero on failure.
  */
@@ -7516,7 +7516,7 @@ mdb_xcursor_init0(MDB_cursor *mc)
 	mx->mx_dbx.md_rel = mc->mc_dbx->md_rel;
 }
 
-/** Final setup of a sorted-dups cursor.
+/** final setup of a sorted-dups cursor.
  *	Sets up the fields that depend on the data from the main cursor.
  * @param[in] mc The main cursor whose sorted-dups cursor is to be initialized.
  * @param[in] node The data containing the #MDB_db record for the
@@ -7991,7 +7991,7 @@ mdb_node_move(MDB_cursor *csrc, MDB_cursor *cdst, int fromleft)
 		}
 	}
 
-	/* Update the parent separators.
+	/* update the parent separators.
 	 */
 	if (csrc->mc_ki[csrc->mc_top] == 0) {
 		if (csrc->mc_ki[csrc->mc_top-1] != 0) {
@@ -8858,7 +8858,7 @@ mdb_page_split(MDB_cursor *mc, MDB_val *newkey, MDB_val *newdata, pgno_t newpgno
 				} else
 					pgno = newpgno;
 				flags = nflags;
-				/* Update index for the new key. */
+				/* update index for the new key. */
 				mc->mc_ki[mc->mc_top] = j;
 			} else {
 				node = (MDB_node *)((char *)mp + copy->mp_ptrs[i] + PAGEBASE);
@@ -9292,7 +9292,7 @@ again:
 		mo->mp_pgno = my->mc_next_pgno++;
 		my->mc_wlen[toggle] += my->mc_env->me_psize;
 		if (mc.mc_top) {
-			/* Update parent if there is one */
+			/* update parent if there is one */
 			ni = NODEPTR(mc.mc_pg[mc.mc_top-1], mc.mc_ki[mc.mc_top-1]);
 			SETPGNO(ni, mo->mp_pgno);
 			mdb_cursor_pop(&mc);

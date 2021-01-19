@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD 14)
 add_library(oocmap SHARED
         oocmap.cpp
         mdb.c
-        midl.c)
+        midl.c spooky.h spooky.cpp)
 set_target_properties(
         oocmap
         PROPERTIES
