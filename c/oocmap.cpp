@@ -607,11 +607,17 @@ static void OOCMap_dealloc(OOCMapObject* self) {
 }
 
 static PyObject* OOCMap_new(PyTypeObject* type, PyObject* args, PyObject* kwds) {
-    OOCMapObject* self = (OOCMapObject*)type->tp_alloc(type, 0);
+    PyObject* pySelf = type->tp_alloc(type, 0);
+    OOCMapObject* self = reinterpret_cast<OOCMapObject*>(pySelf);
     if(self == nullptr) {
         PyErr_NoMemory();
     } else {
-        mdb_env_create(&self->mdb);
+        const int error = mdb_env_create(&self->mdb);
+        if(error != 0) {
+            type->tp_dealloc(pySelf);
+            MdbError(error).pythonize();
+            return nullptr;
+        }
         mdb_env_set_maxdbs(self->mdb, 6);
     }
     return (PyObject*)self;
