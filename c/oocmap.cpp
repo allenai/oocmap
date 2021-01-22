@@ -783,7 +783,7 @@ static PyTypeObject OOCMapType = {
 };
 
 static inline bool isOOCMap(PyObject* const self) {
-    return self->ob_type != &OOCMapType;
+    return self->ob_type == &OOCMapType;
 }
 
 static PyMethodDef OocmapMethods[] = {
