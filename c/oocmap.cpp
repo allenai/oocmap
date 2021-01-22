@@ -619,7 +619,7 @@ static PyObject* OOCMap_new(PyTypeObject* type, PyObject* args, PyObject* kwds) 
 
 static int OOCMap_init(OOCMapObject* self, PyObject* args, PyObject* kwds) {
     // parse parameters
-    static const char *kwlist[] = {"filename", "mapsize", nullptr};
+    static const char *kwlist[] = {"filename", "max_size", nullptr};
     PyObject* filenameObject = nullptr;
     unsigned long long mapsize = 0;
     const int parseSuccess = PyArg_ParseTupleAndKeywords(
