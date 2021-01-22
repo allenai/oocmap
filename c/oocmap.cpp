@@ -27,7 +27,10 @@ struct EncodedValue {
         } asDictKey;
     };
     uint8_t typeCode : 5;
-    uint8_t length : 3;
+    uint8_t lengthMinusOne : 3;
+    // The maximum possible length we want to express is 8, but the length field has only 3 bits.
+    // Since none of the types that use the length field can be of length 0, we store length-1
+    // instead.
 };
 _Static_assert(sizeof(EncodedValue) == 9, "EncodedValue must be 9 bytes in size.");
 
@@ -270,11 +273,12 @@ static const uint8_t TYPE_CODE_LIST = 11;
 static const uint8_t TYPE_CODE_DICT = 12;
 
 // hardcoded values
-static const EncodedValue ENCODED_NONE = {.asInt = 0, .typeCode = TYPE_CODE_HARDCODED, .length = 0};
-static const EncodedValue ENCODED_INT_ZERO = {.asInt = 1, .typeCode = TYPE_CODE_HARDCODED, .length = 0};
-static const EncodedValue ENCODED_TRUE = {.asInt = 3, .typeCode = TYPE_CODE_HARDCODED, .length = 0};
-static const EncodedValue ENCODED_FALSE = {.asInt = 4, .typeCode = TYPE_CODE_HARDCODED, .length = 0};
-static const EncodedValue ENCODED_EMPTY_TUPLE = {.asInt = 5, .typeCode = TYPE_CODE_HARDCODED, .length = 0};
+static const EncodedValue ENCODED_NONE = {.asInt = 0, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_INT_ZERO = {.asInt = 1, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_TRUE = {.asInt = 3, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_FALSE = {.asInt = 4, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_EMPTY_TUPLE = {.asInt = 5, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_EMPTY_STRING = {.asInt = 6, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
 
 static void OOCMap_encode(
     OOCMapObject* const self,
@@ -322,7 +326,7 @@ static void OOCMap_encode(
                     longObject->ob_base.ob_size > 0 ?
                     TYPE_CODE_SHORT_POSITIVE_INT :
                     TYPE_CODE_SHORT_NEGATIVE_INT;
-                dest->length = longBufferSize;
+                dest->lengthMinusOne = longBufferSize - 1;
                 destInTheMap = dest;
                 return;
             } else {
@@ -331,7 +335,7 @@ static void OOCMap_encode(
                     longObject->ob_base.ob_size > 0 ?
                     TYPE_CODE_LONG_POSITIVE_INT :
                     TYPE_CODE_LONG_NEGATIVE_INT;
-                dest->length = 0;
+                dest->lengthMinusOne = 0;
 
                 MDB_val mdbValue = { .mv_size = longBufferSize, .mv_data = longObject->ob_digit };
 
@@ -367,7 +371,7 @@ static void OOCMap_encode(
     if(PyFloat_CheckExact(value)) {
         dest->asFloat = PyFloat_AS_DOUBLE(value);
         dest->typeCode = TYPE_CODE_FLOAT;
-        dest->length = 0;
+        dest->lengthMinusOne = 0;
         destInTheMap = dest;
         return;
     }
@@ -386,43 +390,44 @@ static void OOCMap_encode(
         const int readyError = PyUnicode_READY(value);
         if(readyError != 0)
             throw OocError(OocError::CouldNotReadyString);
-
-        const int kind = PyUnicode_KIND(value);
         size_t dataSize = PyUnicode_GET_LENGTH(value);
-        switch(kind) {
-        case PyUnicode_WCHAR_KIND:
-            dest->typeCode = TYPE_CODE_UNICODE_WCHAR;
-            dataSize *= Py_UNICODE_SIZE;
-            break;
-        case PyUnicode_1BYTE_KIND:
-            dest->typeCode = TYPE_CODE_UNICODE_1BYTE;
-            dataSize *= sizeof(Py_UCS1);
-            break;
-        case PyUnicode_2BYTE_KIND:
-            dest->typeCode = TYPE_CODE_UNICODE_2BYTE;
-            dataSize *= sizeof(Py_UCS2);
-            break;
-        case PyUnicode_4BYTE_KIND:
-            dest->typeCode = TYPE_CODE_UNICODE_4BYTE;
-            dataSize *= sizeof(Py_UCS4);
-            break;
-        default:
-            throw OocError(OocError::InvalidStringKind);
-        }
-
-        if(dataSize <= sizeof(dest->asChars)) {
-            // String fits into one EncodedValue
-            dest->length = dataSize;
-            memcpy(dest->asChars, PyUnicode_DATA(value), dataSize);
+        if(dataSize == 0) {
+            *dest = ENCODED_EMPTY_STRING;
             destInTheMap = dest;
             return;
         } else {
-            // String does not fit into one EncodedValue, has to be written to DB
-            dest->length = 0;
-            MDB_val mdbValue = { .mv_size = dataSize, .mv_data = PyUnicode_DATA(value) };
-            dest->asUInt = putImmutable(txn, self->stringsDb, &mdbValue, dest->typeCode, readonly);
-            destInTheMap = dest;
-            return;
+            const int kind = PyUnicode_KIND(value);
+            switch(kind) {
+            case PyUnicode_WCHAR_KIND:dest->typeCode = TYPE_CODE_UNICODE_WCHAR;
+                dataSize *= Py_UNICODE_SIZE;
+                break;
+            case PyUnicode_1BYTE_KIND:dest->typeCode = TYPE_CODE_UNICODE_1BYTE;
+                dataSize *= sizeof(Py_UCS1);
+                break;
+            case PyUnicode_2BYTE_KIND:dest->typeCode = TYPE_CODE_UNICODE_2BYTE;
+                dataSize *= sizeof(Py_UCS2);
+                break;
+            case PyUnicode_4BYTE_KIND:dest->typeCode = TYPE_CODE_UNICODE_4BYTE;
+                dataSize *= sizeof(Py_UCS4);
+                break;
+            default:
+                throw OocError(OocError::InvalidStringKind);
+            }
+
+            if(dataSize <= sizeof(dest->asChars)) {
+                // String fits into one EncodedValue
+                dest->lengthMinusOne = dataSize - 1;
+                memcpy(dest->asChars, PyUnicode_DATA(value), dataSize);
+                destInTheMap = dest;
+                return;
+            } else {
+                // String does not fit into one EncodedValue, has to be written to DB
+                dest->lengthMinusOne = 0;
+                MDB_val mdbValue = {.mv_size = dataSize, .mv_data = PyUnicode_DATA(value)};
+                dest->asUInt = putImmutable(txn, self->stringsDb, &mdbValue, dest->typeCode, readonly);
+                destInTheMap = dest;
+                return;
+            }
         }
     }
 
@@ -449,7 +454,7 @@ static void OOCMap_encode(
                 );
             }
 
-            dest->length = 0;
+            dest->lengthMinusOne = 0;
             dest->typeCode = TYPE_CODE_TUPLE;
             MDB_val mdbValue = {
                 .mv_size = PyTuple_GET_SIZE(value) * sizeof(EncodedValue),
