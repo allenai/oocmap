@@ -7,7 +7,9 @@ oocmap_module = Extension(
         'mdb.c',
         'midl.c',
         'spooky.cpp'
-    ])
+    ],
+    extra_compile_args=["-O0", "-g"],    # DEBUG
+)
 
 setup(name='oocmap',
     version='0.1',
