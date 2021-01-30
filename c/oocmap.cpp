@@ -54,6 +54,8 @@ struct OocError : std::exception {
         InvalidStringKind,
         OutOfMemory,
         UnknownType,
+        UnknownHardcodedValue,
+        UnexpectedData,
         MdbError
     } errorCode;
 
@@ -82,6 +84,12 @@ struct OocError : std::exception {
         case UnknownType:
             PyErr_Format(PyExc_ValueError, "Tried to serialize object of unknown type");
             break;
+        case UnknownHardcodedValue:
+            PyErr_Format(PyExc_AssertionError, "Unexpected hardcoded value");
+            break;
+        case UnexpectedData:
+            PyErr_Format(PyExc_AssertionError, "Unexpected data in database");
+            break;
         case MdbError:
             PyErr_Format(PyExc_IOError, "Unknown problem with LMDB");
             break;
@@ -108,7 +116,7 @@ struct UnknownTypeError : OocError {
 struct MdbError : OocError {
     const int mdbErrorCode;
 
-    explicit MdbError(const int mdbErrorCode) :
+    explicit MdbError(const int errorCode) :
         OocError(OocError::MdbError),
         mdbErrorCode(errorCode)
     { }
@@ -219,6 +227,17 @@ static void put(
         throw MdbError(error);
 }
 
+static void get(
+    MDB_txn* const txn,
+    const MDB_dbi dbi,
+    MDB_val* const key,
+    MDB_val* const value
+) {
+    const int error = mdb_get(txn, dbi, key, value);
+    if(error != 0)
+        throw MdbError(error);
+}
+
 static uint64_t putImmutable(
     MDB_txn* const txn,
     const MDB_dbi dbi,
@@ -290,7 +309,7 @@ static void OOCMap_encode(
 ) {
     // Python's cell objects
     if(PyCell_Check(value)) {
-        OOCMap_encode(self, PyCell_GET(value), dest, txn, insertedItemsInThisTransaction);
+        OOCMap_encode(self, PyCell_GET(value), dest, txn, insertedItemsInThisTransaction, readonly);
         return;
     }
 
@@ -307,6 +326,8 @@ static void OOCMap_encode(
         destInTheMap = dest;
         return;
     }
+
+    // TODO: Do this in terms of "protocols", not concrete objects (https://docs.python.org/3/c-api/mapping.html and friends)
 
     // Python's integers
     if(PyLong_CheckExact(value)) {
@@ -599,6 +620,75 @@ static void OOCMap_encode(
     throw UnknownTypeError(PyObject_Type(value));
 }
 
+PyObject* OOCMap_decode(
+    OOCMapObject* const self,
+    const EncodedValue* const encodedValue,
+    MDB_txn* const txn,
+    Id2EncodedMap& insertedItemsInThisTransaction
+) {
+    switch(encodedValue->typeCode) {
+    case TYPE_CODE_HARDCODED: {
+        PyObject* result = nullptr;
+        switch(encodedValue->asInt) {
+        case 0:
+            Py_INCREF(Py_None);
+            return Py_None;
+        case 1:
+            result = PyLong_FromLong(0);
+            break;
+        case 3:
+            Py_INCREF(Py_True);
+            return Py_True;
+        case 4:
+            Py_INCREF(Py_False);
+            return Py_False;
+        case 5:
+            result = PyTuple_New(0);
+            break;
+        case 6:
+            result = PyUnicode_New(0, 127);
+            break;
+        default:
+            throw OocError(OocError::UnknownHardcodedValue);
+        }
+        if(result == nullptr) throw OocError(OocError::OutOfMemory);
+        return result;
+    }
+    case TYPE_CODE_SHORT_POSITIVE_INT:
+    case TYPE_CODE_SHORT_NEGATIVE_INT: {
+        const size_t length = encodedValue->lengthMinusOne + 1;
+        PyLongObject* const result = _PyLong_New(length / sizeof(digit));
+        // TODO: Every duplicate long will create its own PyObject this way. We should cache
+        // them and return the same ones multiple times if possible.
+        if(result == nullptr) throw OocError(OocError::OutOfMemory);
+        //result->ob_base.ob_size = length / sizeof(digit);
+        if(encodedValue->typeCode == TYPE_CODE_SHORT_NEGATIVE_INT)
+            result->ob_base.ob_size *= -1;
+        memcpy(result->ob_digit, encodedValue->asChars, length);
+        return (PyObject*)result;
+    }
+    case TYPE_CODE_LONG_POSITIVE_INT:
+    case TYPE_CODE_LONG_NEGATIVE_INT:
+        // TODO
+        throw OocError(OocError::UnknownType);
+    case TYPE_CODE_FLOAT:
+        return PyFloat_FromDouble(encodedValue->asFloat);
+    case TYPE_CODE_UNICODE_WCHAR:
+    case TYPE_CODE_UNICODE_1BYTE:
+    case TYPE_CODE_UNICODE_2BYTE:
+    case TYPE_CODE_UNICODE_4BYTE:
+        // TODO
+    case TYPE_CODE_TUPLE:
+        // TODO
+    case TYPE_CODE_LIST:
+        // TODO
+    case TYPE_CODE_DICT:
+        // TODO
+    default:
+        throw OocError(OocError::UnknownType);
+    }
+}
+
 static bool isOOCMap(PyObject* self);
 
 //
@@ -751,6 +841,48 @@ static int OOCMap_insert(PyObject* pySelf, PyObject* key, PyObject* value) {
     return 0;
 }
 
+static PyObject* OOCMap_get(PyObject* pySelf, PyObject* key) {
+    // cast the input
+    if(!isOOCMap(pySelf)) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCMapObject* self = reinterpret_cast<OOCMapObject*>(pySelf);
+
+    MDB_txn* txn = nullptr;
+    try {
+        txn = txn_begin(self, false);
+        Id2EncodedMap insertedItemsInThisTransaction;
+
+        EncodedValue encodedKey;
+        OOCMap_encode(self, key, &encodedKey, txn, insertedItemsInThisTransaction, true);
+        MDB_val mdbKey = {.mv_size=sizeof(encodedKey), .mv_data=&encodedKey};
+
+        MDB_val mdbValue;
+        get(txn, self->rootDb, &mdbKey, &mdbValue);
+        if(mdbValue.mv_size != sizeof(EncodedValue))
+            throw OocError(OocError::UnexpectedData);
+        EncodedValue* encodedValue = static_cast<EncodedValue*>(mdbValue.mv_data);
+
+        PyObject* const result = OOCMap_decode(self, encodedValue, txn, insertedItemsInThisTransaction);
+        txn_commit(txn);
+        return result;
+    } catch(const MdbError& error) {
+        if(txn != nullptr) txn_abort(txn);
+        if(error.mdbErrorCode == MDB_NOTFOUND)
+            PyErr_Format(PyExc_KeyError, ""); // TODO: put in repr(key) as the error message
+        else
+            error.pythonize();
+        return nullptr;
+    } catch(const OocError& error) {
+        if(txn != nullptr) txn_abort(txn);
+        if(error.errorCode == OocError::ImmutableValueNotFound)
+            PyErr_Format(PyExc_KeyError, ""); // TODO: put in repr(key) as the error message
+        else
+            error.pythonize();
+        return nullptr;
+    }
+}
 
 
 //
@@ -775,7 +907,7 @@ static PyMethodDef OOCMap_methods[] = {
 
 static PyMappingMethods OOCMap_mapping_methods = {
         .mp_length = OOCMap_length,
-        .mp_subscript = nullptr,
+        .mp_subscript = OOCMap_get,
         .mp_ass_subscript = OOCMap_insert
 };
 
