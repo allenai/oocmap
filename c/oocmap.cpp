@@ -760,8 +760,37 @@ PyObject* OOCMap_decode(
     case TYPE_CODE_UNICODE_LONG_WCHAR:
     case TYPE_CODE_UNICODE_LONG_1BYTE:
     case TYPE_CODE_UNICODE_LONG_2BYTE:
-    case TYPE_CODE_UNICODE_LONG_4BYTE:
-        // TODO
+    case TYPE_CODE_UNICODE_LONG_4BYTE: {
+        MDB_val mdbKey = {.mv_size = sizeof(encodedValue->asUInt), .mv_data = &(encodedValue->asUInt)};
+        MDB_val mdbValue;
+        get(txn, self->stringsDb, &mdbKey, &mdbValue);
+
+        Py_ssize_t size = mdbValue.mv_size;
+        int kind;
+        switch(encodedValue->typeCode) {
+        case TYPE_CODE_UNICODE_LONG_WCHAR:
+            size /= Py_UNICODE_SIZE;
+            kind = PyUnicode_WCHAR_KIND;
+            break;
+        case TYPE_CODE_UNICODE_LONG_1BYTE:
+            size /= sizeof(Py_UCS1);
+            kind = PyUnicode_1BYTE_KIND;
+            break;
+        case TYPE_CODE_UNICODE_LONG_2BYTE:
+            size /= sizeof(Py_UCS2);
+            kind = PyUnicode_2BYTE_KIND;
+            break;
+        case TYPE_CODE_UNICODE_LONG_4BYTE:
+            size /= sizeof(Py_UCS4);
+            kind = PyUnicode_4BYTE_KIND;
+            break;
+        default:
+            throw OocError(OocError::UnexpectedData);
+        }
+        PyObject* const result = PyUnicode_FromKindAndData(kind, mdbValue.mv_data, size);
+        if(result == nullptr) throw OocError(OocError::OutOfMemory);
+        return result;
+    }
     case TYPE_CODE_TUPLE:
         // TODO
     case TYPE_CODE_LIST:
