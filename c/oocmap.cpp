@@ -110,7 +110,7 @@ struct OocError : std::exception {
             PyErr_NoMemory();
             break;
         case UnknownType:
-            PyErr_Format(PyExc_ValueError, "Tried to serialize object of unknown type");
+            PyErr_Format(PyExc_ValueError, "Tried to serialize or deserialize object of unknown type");
             break;
         case UnknownHardcodedValue:
             PyErr_Format(PyExc_AssertionError, "Unexpected hardcoded value");
