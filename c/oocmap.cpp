@@ -650,9 +650,10 @@ static void OOCMap_encode(
 
 PyObject* OOCMap_decode(
     OOCMapObject* const self,
-    const EncodedValue* const encodedValue,
-    MDB_txn* const txn,
-    Id2EncodedMap& insertedItemsInThisTransaction
+    EncodedValue* const encodedValue,
+    MDB_txn* const txn
+    // We don't need a cache of objects we have decoded. Because of lazyness, we only ever decode
+    // one object at a time.
 ) {
     switch(encodedValue->typeCode) {
     case TYPE_CODE_HARDCODED: {
@@ -689,16 +690,24 @@ PyObject* OOCMap_decode(
         // TODO: Every duplicate long will create its own PyObject this way. We should cache
         // them and return the same ones multiple times if possible.
         if(result == nullptr) throw OocError(OocError::OutOfMemory);
-        //result->ob_base.ob_size = length / sizeof(digit);
         if(encodedValue->typeCode == TYPE_CODE_SHORT_NEGATIVE_INT)
             result->ob_base.ob_size *= -1;
         memcpy(result->ob_digit, encodedValue->asChars, length);
         return (PyObject*)result;
     }
     case TYPE_CODE_LONG_POSITIVE_INT:
-    case TYPE_CODE_LONG_NEGATIVE_INT:
-        // TODO
-        throw OocError(OocError::UnknownType);
+    case TYPE_CODE_LONG_NEGATIVE_INT: {
+        MDB_val mdbKey = { .mv_size = sizeof(encodedValue->asUInt), .mv_data = &(encodedValue->asUInt) };
+        MDB_val mdbValue;
+        get(txn, self->intsDb, &mdbKey, &mdbValue);
+
+        PyLongObject* const result = _PyLong_New(mdbValue.mv_size / sizeof(digit));
+        if(result == nullptr) throw OocError(OocError::OutOfMemory);
+        if(encodedValue->typeCode == TYPE_CODE_LONG_NEGATIVE_INT)
+            result->ob_base.ob_size *= -1;
+        memcpy(result->ob_digit, mdbValue.mv_data, mdbValue.mv_size);
+        return (PyObject*)result;
+    }
     case TYPE_CODE_FLOAT:
         return PyFloat_FromDouble(encodedValue->asFloat);
     case TYPE_CODE_UNICODE_WCHAR:
