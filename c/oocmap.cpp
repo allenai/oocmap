@@ -562,9 +562,7 @@ static void OOCMap_encode(
                 .mv_data = &encodedListElement.asUInt
             };
 
-            for(
-                Py_ssize_t i = 0; i < PyList_GET_SIZE(value); ++i
-            ) {
+            for(Py_ssize_t i = 0; i < PyList_GET_SIZE(value); ++i) {
                 encodedListElement.asListKey.listIndex = i;
                 MDB_val mdbElementValue = {.mv_size = sizeof(EncodedValue), .mv_data = nullptr};
                 put(txn, self->listsDb, &mdbElementKey, &mdbElementValue, MDB_RESERVE);
