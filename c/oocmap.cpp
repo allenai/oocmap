@@ -731,29 +731,28 @@ PyObject* OOCMap_decode(
     case TYPE_CODE_UNICODE_SHORT_1BYTE:
     case TYPE_CODE_UNICODE_SHORT_2BYTE:
     case TYPE_CODE_UNICODE_SHORT_4BYTE: {
-        Py_ssize_t size;
+        Py_ssize_t size = encodedValue->lengthMinusOne + 1;
         int kind;
         switch(encodedValue->typeCode) {
         case TYPE_CODE_UNICODE_SHORT_WCHAR:
-            size = Py_UNICODE_SIZE;
+            size /= Py_UNICODE_SIZE;
             kind = PyUnicode_WCHAR_KIND;
             break;
         case TYPE_CODE_UNICODE_SHORT_1BYTE:
-            size = sizeof(Py_UCS1);
+            size /= sizeof(Py_UCS1);
             kind = PyUnicode_1BYTE_KIND;
             break;
         case TYPE_CODE_UNICODE_SHORT_2BYTE:
-            size = sizeof(Py_UCS2);
+            size /= sizeof(Py_UCS2);
             kind = PyUnicode_2BYTE_KIND;
             break;
         case TYPE_CODE_UNICODE_SHORT_4BYTE:
-            size = sizeof(Py_UCS4);
+            size /= sizeof(Py_UCS4);
             kind = PyUnicode_4BYTE_KIND;
             break;
         default:
             throw OocError(OocError::UnexpectedData);
         }
-        size *= encodedValue->lengthMinusOne + 1;
         PyObject* const result = PyUnicode_FromKindAndData(kind, encodedValue->asChars, size);
         if(result == nullptr) throw OocError(OocError::OutOfMemory);
         return result;
