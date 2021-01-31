@@ -377,7 +377,7 @@ static void OOCMap_encode(
             const size_t longBufferSize = sizeof(digit) * abs(longObject->ob_base.ob_size);
             if(longBufferSize <= sizeof(dest->asChars)) {
                 // Integer fits into EncodedValue directly
-                dest->asInt = 0;
+                dest->asUInt = 0;
                 memcpy(dest->asChars, longObject->ob_digit, longBufferSize);
                 dest->typeCode =
                     longObject->ob_base.ob_size > 0 ?
