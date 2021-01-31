@@ -466,6 +466,7 @@ static void OOCMap_encode(
             if(dataSize <= sizeof(dest->asChars)) {
                 // String fits into one EncodedValue
                 dest->lengthMinusOne = dataSize - 1;
+                dest->asUInt = 0;
                 memcpy(dest->asChars, PyUnicode_DATA(value), dataSize);
                 destInTheMap = dest;
                 return;
