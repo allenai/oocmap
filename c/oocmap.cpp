@@ -311,13 +311,21 @@ static const uint8_t TYPE_CODE_SHORT_NEGATIVE_INT = 2;
 static const uint8_t TYPE_CODE_LONG_POSITIVE_INT = 3;
 static const uint8_t TYPE_CODE_LONG_NEGATIVE_INT = 4;
 static const uint8_t TYPE_CODE_FLOAT = 5;
-static const uint8_t TYPE_CODE_UNICODE_WCHAR = 6;
-static const uint8_t TYPE_CODE_UNICODE_1BYTE = 7;
-static const uint8_t TYPE_CODE_UNICODE_2BYTE = 8;
-static const uint8_t TYPE_CODE_UNICODE_4BYTE = 9;
-static const uint8_t TYPE_CODE_TUPLE = 10;
-static const uint8_t TYPE_CODE_LIST = 11;
-static const uint8_t TYPE_CODE_DICT = 12;
+static const uint8_t TYPE_CODE_UNICODE_SHORT_WCHAR = 6;
+static const uint8_t TYPE_CODE_UNICODE_SHORT_1BYTE = 7;
+static const uint8_t TYPE_CODE_UNICODE_SHORT_2BYTE = 8;
+static const uint8_t TYPE_CODE_UNICODE_SHORT_4BYTE = 9;
+static const uint8_t TYPE_CODE_UNICODE_LONG_WCHAR = 10; static const uint8_t TYPE_CODE_UNICODE_LONG_SHORT_OFFSET = TYPE_CODE_UNICODE_LONG_WCHAR - TYPE_CODE_UNICODE_SHORT_WCHAR;
+static const uint8_t TYPE_CODE_UNICODE_LONG_1BYTE = 11;
+static const uint8_t TYPE_CODE_UNICODE_LONG_2BYTE = 12;
+static const uint8_t TYPE_CODE_UNICODE_LONG_4BYTE = 13;
+static const uint8_t TYPE_CODE_TUPLE = 14;
+static const uint8_t TYPE_CODE_LIST = 15;
+static const uint8_t TYPE_CODE_DICT = 16;
+static const uint8_t TYPE_CODE_SET = 17;
+static const uint8_t TYPE_CODE_COMPLEX = 18;
+static const uint8_t TYPE_CODE_BYTES = 19;
+static const uint8_t TYPE_CODE_BYTEARRAY = 20;
 
 // hardcoded values
 static const EncodedValue ENCODED_NONE = {.asInt = 0, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
@@ -447,16 +455,20 @@ static void OOCMap_encode(
         } else {
             const int kind = PyUnicode_KIND(value);
             switch(kind) {
-            case PyUnicode_WCHAR_KIND:dest->typeCode = TYPE_CODE_UNICODE_WCHAR;
+            case PyUnicode_WCHAR_KIND:
+                dest->typeCode = TYPE_CODE_UNICODE_SHORT_WCHAR;
                 dataSize *= Py_UNICODE_SIZE;
                 break;
-            case PyUnicode_1BYTE_KIND:dest->typeCode = TYPE_CODE_UNICODE_1BYTE;
+            case PyUnicode_1BYTE_KIND:
+                dest->typeCode = TYPE_CODE_UNICODE_SHORT_1BYTE;
                 dataSize *= sizeof(Py_UCS1);
                 break;
-            case PyUnicode_2BYTE_KIND:dest->typeCode = TYPE_CODE_UNICODE_2BYTE;
+            case PyUnicode_2BYTE_KIND:
+                dest->typeCode = TYPE_CODE_UNICODE_SHORT_2BYTE;
                 dataSize *= sizeof(Py_UCS2);
                 break;
-            case PyUnicode_4BYTE_KIND:dest->typeCode = TYPE_CODE_UNICODE_4BYTE;
+            case PyUnicode_4BYTE_KIND:
+                dest->typeCode = TYPE_CODE_UNICODE_SHORT_4BYTE;
                 dataSize *= sizeof(Py_UCS4);
                 break;
             default:
@@ -473,6 +485,7 @@ static void OOCMap_encode(
             } else {
                 // String does not fit into one EncodedValue, has to be written to DB
                 dest->lengthMinusOne = 0;
+                dest->typeCode += TYPE_CODE_UNICODE_LONG_SHORT_OFFSET;
                 MDB_val mdbValue = {.mv_size = dataSize, .mv_data = PyUnicode_DATA(value)};
                 dest->asUInt = putImmutable(txn, self->stringsDb, &mdbValue, dest->typeCode, readonly);
                 destInTheMap = dest;
@@ -709,12 +722,46 @@ PyObject* OOCMap_decode(
         memcpy(result->ob_digit, mdbValue.mv_data, mdbValue.mv_size);
         return (PyObject*)result;
     }
-    case TYPE_CODE_FLOAT:
-        return PyFloat_FromDouble(encodedValue->asFloat);
-    case TYPE_CODE_UNICODE_WCHAR:
-    case TYPE_CODE_UNICODE_1BYTE:
-    case TYPE_CODE_UNICODE_2BYTE:
-    case TYPE_CODE_UNICODE_4BYTE:
+    case TYPE_CODE_FLOAT: {
+        PyObject* const result = PyFloat_FromDouble(encodedValue->asFloat);
+        if(result == nullptr) throw OocError(OocError::OutOfMemory);
+        return result;
+    }
+    case TYPE_CODE_UNICODE_SHORT_WCHAR:
+    case TYPE_CODE_UNICODE_SHORT_1BYTE:
+    case TYPE_CODE_UNICODE_SHORT_2BYTE:
+    case TYPE_CODE_UNICODE_SHORT_4BYTE: {
+        Py_ssize_t size;
+        int kind;
+        switch(encodedValue->typeCode) {
+        case TYPE_CODE_UNICODE_SHORT_WCHAR:
+            size = Py_UNICODE_SIZE;
+            kind = PyUnicode_WCHAR_KIND;
+            break;
+        case TYPE_CODE_UNICODE_SHORT_1BYTE:
+            size = sizeof(Py_UCS1);
+            kind = PyUnicode_1BYTE_KIND;
+            break;
+        case TYPE_CODE_UNICODE_SHORT_2BYTE:
+            size = sizeof(Py_UCS2);
+            kind = PyUnicode_2BYTE_KIND;
+            break;
+        case TYPE_CODE_UNICODE_SHORT_4BYTE:
+            size = sizeof(Py_UCS4);
+            kind = PyUnicode_4BYTE_KIND;
+            break;
+        default:
+            throw OocError(OocError::UnexpectedData);
+        }
+        size *= encodedValue->lengthMinusOne + 1;
+        PyObject* const result = PyUnicode_FromKindAndData(kind, encodedValue->asChars, size);
+        if(result == nullptr) throw OocError(OocError::OutOfMemory);
+        return result;
+    }
+    case TYPE_CODE_UNICODE_LONG_WCHAR:
+    case TYPE_CODE_UNICODE_LONG_1BYTE:
+    case TYPE_CODE_UNICODE_LONG_2BYTE:
+    case TYPE_CODE_UNICODE_LONG_4BYTE:
         // TODO
     case TYPE_CODE_TUPLE:
         // TODO
