@@ -26,13 +26,38 @@ struct EncodedValue {
             uint32_t reserved;
         } asDictKey;
     };
-    uint8_t typeCode : 5;
-    uint8_t lengthMinusOne : 3;
+    union {
+        struct {
+            uint8_t typeCode: 5;
+            uint8_t lengthMinusOne: 3;
+        };
+        uint8_t typeCodeWithLength;
+    };
     // The maximum possible length we want to express is 8, but the length field has only 3 bits.
     // Since none of the types that use the length field can be of length 0, we store length-1
     // instead.
+
+    bool operator==(const EncodedValue& other) const {
+        return asUInt == other.asUInt && typeCodeWithLength == other.typeCodeWithLength;
+    }
+
+    bool operator!=(const EncodedValue& other) const {
+        return asUInt != other.asUInt || typeCodeWithLength != other.typeCodeWithLength;
+    }
 };
 _Static_assert(sizeof(EncodedValue) == 9, "EncodedValue must be 9 bytes in size.");
+
+// This is seriously how to write a custom hash function, no joke 🙄
+namespace std {
+    template<> struct hash<EncodedValue> {
+        size_t operator()(const EncodedValue& value) const {
+            return static_cast<size_t>(value.asUInt) ^ (
+                static_cast<size_t>(value.typeCodeWithLength) <<
+                    ((sizeof(size_t) - sizeof(value.typeCodeWithLength)) * 8)
+            );
+        };
+    };
+}
 
 // This is the structure that defines the keys in the dicts table. Dicts are different
 // because the keys are not integers but variable-length.
@@ -43,7 +68,10 @@ struct DictItemKey {
 
 #pragma options align=reset
 
+// Mapping PyObjects to EncodedValues so we can avoid encoding the same value twice.
 typedef std::unordered_map<PyObject*, const EncodedValue*> Id2EncodedMap;
+// Mapping EncodedValues to PyObjects so we can avoid decoding the same value twice.
+typedef std::unordered_map<EncodedValue, PyObject*> Encoded2IdMap;
 
 struct OocError : std::exception {
     const enum ErrorCode {
