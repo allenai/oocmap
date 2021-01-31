@@ -907,14 +907,14 @@ static PyObject* OOCMap_get(PyObject* pySelf, PyObject* key) {
     } catch(const MdbError& error) {
         if(txn != nullptr) txn_abort(txn);
         if(error.mdbErrorCode == MDB_NOTFOUND)
-            PyErr_Format(PyExc_KeyError, ""); // TODO: put in repr(key) as the error message
+            PyErr_SetObject(PyExc_KeyError, key);
         else
             error.pythonize();
         return nullptr;
     } catch(const OocError& error) {
         if(txn != nullptr) txn_abort(txn);
         if(error.errorCode == OocError::ImmutableValueNotFound)
-            PyErr_Format(PyExc_KeyError, ""); // TODO: put in repr(key) as the error message
+            PyErr_SetObject(PyExc_KeyError, key);
         else
             error.pythonize();
         return nullptr;
