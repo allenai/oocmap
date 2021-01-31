@@ -901,7 +901,7 @@ static PyObject* OOCMap_get(PyObject* pySelf, PyObject* key) {
             throw OocError(OocError::UnexpectedData);
         EncodedValue* encodedValue = static_cast<EncodedValue*>(mdbValue.mv_data);
 
-        PyObject* const result = OOCMap_decode(self, encodedValue, txn, insertedItemsInThisTransaction);
+        PyObject* const result = OOCMap_decode(self, encodedValue, txn);
         txn_commit(txn);
         return result;
     } catch(const MdbError& error) {
