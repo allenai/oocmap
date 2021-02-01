@@ -1,63 +1,14 @@
-#define PY_SSIZE_T_CLEAN
-#include <Python.h>
-#include <unordered_map>
+#include "oocmap.h"
+
 #include <memory>
 #include <random>
-#include "lmdb.h"
 #include "spooky.h"
 
+#include "errors.h"
+#include "db.h"
+#include "lazytuple.h"
 
 static std::mt19937 random_engine(std::chrono::system_clock::now().time_since_epoch().count());
-
-#pragma pack(1)
-
-struct EncodedValue {
-    union {
-        uint8_t asChars[8];
-        int64_t asInt;
-        uint64_t asUInt;
-        double asFloat;
-        struct {
-            uint32_t listId;
-            uint32_t listIndex;
-        } asListKey;
-        struct {
-            uint32_t dictId;
-            uint32_t reserved;
-        } asDictKey;
-    };
-    union {
-        struct {
-            uint8_t typeCode: 5;
-            uint8_t lengthMinusOne: 3;
-        };
-        uint8_t typeCodeWithLength;
-    };
-    // The maximum possible length we want to express is 8, but the length field has only 3 bits.
-    // Since none of the types that use the length field can be of length 0, we store length-1
-    // instead.
-
-    bool operator==(const EncodedValue& other) const {
-        return asUInt == other.asUInt && typeCodeWithLength == other.typeCodeWithLength;
-    }
-
-    bool operator!=(const EncodedValue& other) const {
-        return asUInt != other.asUInt || typeCodeWithLength != other.typeCodeWithLength;
-    }
-};
-_Static_assert(sizeof(EncodedValue) == 9, "EncodedValue must be 9 bytes in size.");
-
-// This is seriously how to write a custom hash function, no joke 🙄
-namespace std {
-    template<> struct hash<EncodedValue> {
-        size_t operator()(const EncodedValue& value) const {
-            return static_cast<size_t>(value.asUInt) ^ (
-                static_cast<size_t>(value.typeCodeWithLength) <<
-                    ((sizeof(size_t) - sizeof(value.typeCodeWithLength)) * 8)
-            );
-        };
-    };
-}
 
 // This is the structure that defines the keys in the dicts table. Dicts are different
 // because the keys are not integers but variable-length.
@@ -66,244 +17,11 @@ struct DictItemKey {
     EncodedValue key;
 };
 
-#pragma options align=reset
-
-// Mapping PyObjects to EncodedValues so we can avoid encoding the same value twice.
-typedef std::unordered_map<PyObject*, const EncodedValue*> Id2EncodedMap;
-// Mapping EncodedValues to PyObjects so we can avoid decoding the same value twice.
-typedef std::unordered_map<EncodedValue, PyObject*> Encoded2IdMap;
-
-struct OocError : std::exception {
-    const enum ErrorCode {
-        NoError,
-        ImmutableValueNotFound,
-        InvalidBool,
-        CouldNotReadyString,
-        InvalidStringKind,
-        OutOfMemory,
-        UnknownType,
-        UnknownHardcodedValue,
-        UnexpectedData,
-        MdbError
-    } errorCode;
-
-    explicit OocError(const ErrorCode errorCode) : errorCode(errorCode) { }
-
-    virtual void pythonize() const {
-        switch(errorCode) {
-        case NoError:
-            PyErr_Format(PyExc_ValueError, "Error: There is no error.");
-            break;
-        case ImmutableValueNotFound:
-            PyErr_Format(PyExc_ValueError, "Tried to write a non-existant immutable value into the DB in a readonly transaction.");
-            break;
-        case InvalidBool:
-            PyErr_Format(PyExc_ValueError, "Found a bool that's neither true nor false.");
-            break;
-        case CouldNotReadyString:
-            PyErr_Format(PyExc_MemoryError, "Could not bring string into the canonical representation.");
-            break;
-        case InvalidStringKind:
-            PyErr_Format(PyExc_ValueError, "Unknown kind of string");
-            break;
-        case OutOfMemory:
-            PyErr_NoMemory();
-            break;
-        case UnknownType:
-            PyErr_Format(PyExc_ValueError, "Tried to serialize or deserialize object of unknown type");
-            break;
-        case UnknownHardcodedValue:
-            PyErr_Format(PyExc_AssertionError, "Unexpected hardcoded value");
-            break;
-        case UnexpectedData:
-            PyErr_Format(PyExc_AssertionError, "Unexpected data in database");
-            break;
-        case MdbError:
-            PyErr_Format(PyExc_IOError, "Unknown problem with LMDB");
-            break;
-        }
-    }
-};
-
-struct UnknownTypeError : OocError {
-    PyObject* const type;
-
-    explicit UnknownTypeError(PyObject* const type) :
-        OocError(OocError::UnknownType),
-        type(type)
-    { }
-
-    virtual void pythonize() const {
-        PyErr_Format(
-            PyExc_ValueError,
-            "Cannot serialize objects of type %s",
-            PyUnicode_AsUTF8(PyObject_Repr(type)));
-    }
-};
-
-struct MdbError : OocError {
-    const int mdbErrorCode;
-
-    explicit MdbError(const int errorCode) :
-        OocError(OocError::MdbError),
-        mdbErrorCode(errorCode)
-    { }
-
-    virtual void pythonize() const {
-        switch(mdbErrorCode) {
-        case 0:
-            PyErr_Format(PyExc_ValueError, "Error: There is no error.");
-            break;
-        case ENOMEM:
-            PyErr_NoMemory();
-            break;
-        case EINVAL:
-            PyErr_Format(PyExc_IOError,"LMDB: An invalid parameter was specified.");
-            break;
-        case ENOSPC:
-            PyErr_Format(PyExc_IOError,"LMDB: No more disk space.");
-            break;
-        case EIO:
-            PyErr_Format(PyExc_IOError,"LMDB: A low-level I/O error occurred while writing.");
-            break;
-        case EACCES:
-            PyErr_Format(PyExc_IOError, "LMDB: Access denied");
-            break;
-        case ENOENT:
-            PyErr_Format(PyExc_IOError, "LMDB Error: The directory specified by the path parameter doesn't exist.");
-            break;
-        case EAGAIN:
-            PyErr_Format(PyExc_IOError, "LMDB Error: The environment was locked by another process.");
-            break;
-        default:
-            PyErr_Format(PyExc_IOError, "MDB Error: %s", mdb_strerror(mdbErrorCode));
-            break;
-        }
-    }
-};
-
-
-typedef struct {
-    PyObject_HEAD
-    MDB_env* mdb;
-    MDB_dbi rootDb;
-    MDB_dbi intsDb;
-    MDB_dbi stringsDb;
-    MDB_dbi listsDb;
-    MDB_dbi tuplesDb;
-    MDB_dbi dictsDb;
-} OOCMapObject;
-
 
 //
 // Functions that are not exposed to Python
 // These are allowed to throw exceptions.
 //
-
-static MDB_txn* txn_begin(OOCMapObject* const self, const bool write = false) {
-    const unsigned int flags = write ? 0 : MDB_RDONLY;
-    MDB_txn* txn = nullptr;
-    int mapsizePatience = 10;
-    while(true) {
-        int error = mdb_txn_begin(self->mdb, nullptr, flags, &txn);
-        switch(error) {
-        case 0:
-            return txn;
-        case MDB_MAP_RESIZED:
-            if (mapsizePatience > 0) {
-                mapsizePatience -= 1;
-                error = mdb_env_set_mapsize(self->mdb, 0);
-                if(error != 0)
-                    throw MdbError(error);
-                MDB_envinfo info;
-                mdb_env_info(self->mdb, &info);
-                continue;
-            } else {
-                throw MdbError(error);
-            }
-        default:
-            throw MdbError(error);
-        }
-    }
-}
-
-static void txn_commit(MDB_txn* const txn) {
-    const int error = mdb_txn_commit(txn);
-    if(error != 0)
-        throw MdbError(error);
-}
-
-static void txn_abort(MDB_txn* const txn) {
-    mdb_txn_abort(txn); // This doesn't return any errors.
-}
-
-static void open_db(MDB_txn* const txn, const char* const name, unsigned int flags, MDB_dbi* const dbi) {
-    const int error = mdb_dbi_open(txn, name, flags | MDB_CREATE, dbi);
-    if(error != 0)
-        throw MdbError(error);
-}
-
-static void put(
-    MDB_txn* const txn,
-    const MDB_dbi dbi,
-    MDB_val* const key,
-    MDB_val* const value,
-    unsigned int flags = 0
-) {
-    const int error = mdb_put(txn, dbi, key, value, flags);
-    if(error != 0)
-        throw MdbError(error);
-}
-
-static void get(
-    MDB_txn* const txn,
-    const MDB_dbi dbi,
-    MDB_val* const key,
-    MDB_val* const value
-) {
-    const int error = mdb_get(txn, dbi, key, value);
-    if(error != 0)
-        throw MdbError(error);
-}
-
-static uint64_t putImmutable(
-    MDB_txn* const txn,
-    const MDB_dbi dbi,
-    MDB_val* const mdbVal,
-    const unsigned char typeCode,
-    const bool readonly = false
-) {
-    uint64_t key = SpookyHash::hash64(
-        mdbVal->mv_data,
-        mdbVal->mv_size,
-        typeCode);
-    MDB_val mdbKey = { .mv_size = sizeof(key), .mv_data = &key };
-
-    if(readonly) {
-        // In a readonly transaction, we turn the put() into a get() to check whether
-        // the value is there.
-        const int error = mdb_get(txn, dbi, &mdbKey, mdbVal);
-        switch(error) {
-        case 0:
-            // We could check here for hash collisions, but we won't.
-            break;
-        case MDB_NOTFOUND:
-            throw OocError(OocError::ImmutableValueNotFound);
-        default:
-            throw MdbError(error);
-        }
-    } else {
-        put(txn, dbi, &mdbKey, mdbVal);
-    }
-
-    return key;
-}
-
-static void del(MDB_txn* const txn, MDB_dbi dbi, MDB_val* key) {
-    const int error = mdb_del(txn, dbi, key, nullptr);
-    if(error != 0)
-        throw MdbError(error);
-}
 
 static const uint8_t TYPE_CODE_HARDCODED = 0;
 static const uint8_t TYPE_CODE_SHORT_POSITIVE_INT = 1;
@@ -335,13 +53,13 @@ static const EncodedValue ENCODED_FALSE = {.asInt = 4, .typeCode = TYPE_CODE_HAR
 static const EncodedValue ENCODED_EMPTY_TUPLE = {.asInt = 5, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
 static const EncodedValue ENCODED_EMPTY_STRING = {.asInt = 6, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
 
-static void OOCMap_encode(
+void OOCMap_encode(
     OOCMapObject* const self,
     PyObject* const value,
     EncodedValue* const dest,
     MDB_txn* const txn,
     Id2EncodedMap& insertedItemsInThisTransaction,
-    const bool readonly = false
+    const bool readonly
 ) {
     // Python's cell objects
     if(PyCell_Check(value)) {
@@ -790,7 +508,7 @@ PyObject* OOCMap_decode(
         return result;
     }
     case TYPE_CODE_TUPLE:
-        // TODO
+        return reinterpret_cast<PyObject*>(OOCLazyTuple_fastnew(self, encodedValue->asUInt));
     case TYPE_CODE_LIST:
         // TODO
     case TYPE_CODE_DICT:
@@ -872,7 +590,7 @@ static int OOCMap_init(OOCMapObject* self, PyObject* args, PyObject* kwds) {
     // open all the DBs
     MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self, true);
+        txn = txn_begin(self->mdb, true);
         open_db(txn, "root", MDB_CREATE, &self->rootDb);
         open_db(txn, "ints", MDB_CREATE | MDB_INTEGERKEY, &self->intsDb);
         open_db(txn, "strings", MDB_CREATE | MDB_INTEGERKEY, &self->stringsDb);
@@ -895,11 +613,11 @@ static Py_ssize_t OOCMap_length(PyObject* pySelf) {
         PyErr_BadArgument();
         return -1;
     }
-    OOCMapObject* self = reinterpret_cast<OOCMapObject*>(pySelf);
+    OOCMapObject* const self = reinterpret_cast<OOCMapObject*>(pySelf);
 
     MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self, false);
+        txn = txn_begin(self->mdb, false);
         MDB_stat stat;
         mdb_stat(txn, self->rootDb, &stat);
         txn_commit(txn);
@@ -923,7 +641,7 @@ static int OOCMap_insert(PyObject* pySelf, PyObject* key, PyObject* value) {
     // start transaction
     MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self, true);
+        txn = txn_begin(self->mdb, true);
         Id2EncodedMap insertedItemsInThisTransaction;
 
         EncodedValue encodedKey;
@@ -962,7 +680,7 @@ static PyObject* OOCMap_get(PyObject* pySelf, PyObject* key) {
 
     MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self, false);
+        txn = txn_begin(self->mdb, false);
         Id2EncodedMap insertedItemsInThisTransaction;
 
         EncodedValue encodedKey;
@@ -1022,7 +740,7 @@ static PyMappingMethods OOCMap_mapping_methods = {
         .mp_ass_subscript = OOCMap_insert
 };
 
-static PyTypeObject OOCMapType = {
+PyTypeObject OOCMapType = {
         PyVarObject_HEAD_INIT(nullptr, 0)
         .tp_name = "oocmap.OOCMap",
         .tp_basicsize = sizeof(OOCMapObject),
@@ -1038,34 +756,4 @@ static PyTypeObject OOCMapType = {
 
 static inline bool isOOCMap(PyObject* const self) {
     return self->ob_type == &OOCMapType;
-}
-
-static PyMethodDef OocmapMethods[] = {
-    {nullptr, nullptr, 0, nullptr}        /* Sentinel */
-};
-
-static struct PyModuleDef oocmap_module = {
-    PyModuleDef_HEAD_INIT,
-    "oocmap",   /* name of module */
-    "A Python dictionary that reads and writes its contents to disk.",
-    -1,
-    OocmapMethods
-};
-
-PyMODINIT_FUNC PyInit_oocmap() {
-    if(PyType_Ready(&OOCMapType) < 0)
-        return nullptr;
-
-    PyObject* const m = PyModule_Create(&oocmap_module);
-    if(m == nullptr)
-        return nullptr;
-
-    Py_INCREF(&OOCMapType);
-    if(PyModule_AddObject(m, "OOCMap", (PyObject*)&OOCMapType) < 0) {
-        Py_DECREF(&OOCMapType);
-        Py_DECREF(m);
-        return nullptr;
-    }
-
-    return m;
 }

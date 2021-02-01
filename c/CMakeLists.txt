@@ -8,9 +8,10 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 98)
 
 add_library(oocmap SHARED
+        module.cpp
         oocmap.cpp
         mdb.c
-        midl.c spooky.h spooky.cpp)
+        midl.c spooky.h spooky.cpp oocmap.h lazytuple.h lazytuple.cpp errors.h errors.cpp db.h db.cpp)
 set_target_properties(
         oocmap
         PROPERTIES

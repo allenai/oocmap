@@ -3,7 +3,11 @@ from distutils.core import setup, Extension
 oocmap_module = Extension(
     'oocmap',
     sources=[
+        'module.cpp',
         'oocmap.cpp',
+        'lazytuple.cpp',
+        'errors.cpp',
+        'db.cpp',
         'mdb.c',
         'midl.c',
         'spooky.cpp'
