@@ -10,7 +10,7 @@ typedef struct {
     PyObject_HEAD
     OOCMapObject* ooc;
     uint64_t tupleId;
-    Py_hash_t cachedHash;
+    PyObject* eager;
 } OOCLazyTupleObject;
 
 extern PyTypeObject OOCLazyTupleType;
