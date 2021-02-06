@@ -18,6 +18,7 @@ static PyObject* OOCLazyTuple_new(PyTypeObject* const type, PyObject* const args
     }
     self->ooc = nullptr;
     self->tupleId = 0;
+    self->cachedHash = -1;
     return (PyObject*)self;
 }
 
@@ -34,8 +35,10 @@ static int OOCLazyTuple_init(OOCLazyTupleObject* const self, PyObject* const arg
     if(!parseSuccess)
         return -1;
 
+    // TODO: consider that __init__ might be called on an already initialized object
     self->ooc = reinterpret_cast<OOCMapObject*>(oocmapObject);
     Py_INCREF(oocmapObject);
+    self->cachedHash = -1;
 
     return 0;
 }
@@ -47,6 +50,7 @@ OOCLazyTupleObject* OOCLazyTuple_fastnew(OOCMapObject* const ooc, const uint64_t
     self->ooc = ooc;
     Py_INCREF(ooc);
     self->tupleId = tupleId;
+    self->cachedHash = -1;
     return self;
 }
 
@@ -135,6 +139,23 @@ PyObject* OOCLazyTuple_eager(PyObject* const pySelf) {
     }
 }
 
+Py_hash_t OOCLazyTuple_hash(PyObject* const pySelf) {
+    if(pySelf->ob_type != &OOCLazyTupleType) {
+        PyErr_BadArgument();
+        return -1;
+    }
+    OOCLazyTupleObject* const self = reinterpret_cast<OOCLazyTupleObject*>(pySelf);
+    if(self->cachedHash != -1) return self->cachedHash;
+
+    // If we want LazyTuple to work as a key in a dict the same way as a normal tuple would, they have to hash
+    // to the same thing. The only way to achieve that is to call eager().
+    PyObject* const eager = OOCLazyTuple_eager(pySelf);
+    if(eager == nullptr) return -1;
+    const Py_hash_t result = PyObject_Hash(eager);
+    Py_DECREF(eager);
+    return result;
+}
+
 static PyMethodDef OOCLazyTuple_methods[] = {
     {
         "eager",
@@ -159,6 +180,7 @@ PyTypeObject OOCLazyTupleType = {
     .tp_basicsize = sizeof(OOCLazyTupleObject),
     .tp_itemsize = 0,
     .tp_dealloc = (destructor)OOCLazyTuple_dealloc,
+    .tp_hash = OOCLazyTuple_hash,
     .tp_as_sequence = &OOCLazyTuple_sequence_methods,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_doc = "A tuple-like class that's backed by an OOCMap",
