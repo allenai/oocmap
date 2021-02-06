@@ -3,7 +3,20 @@
 #include "spooky.h"
 #include "errors.h"
 
+class GilUnlocker {
+    PyThreadState* const m_threadState;
+
+public:
+    GilUnlocker() : m_threadState(PyGILState_Check() ? PyEval_SaveThread() : nullptr) { }
+    ~GilUnlocker() {
+        if(m_threadState != nullptr)
+            PyEval_RestoreThread(m_threadState);
+    }
+};
+
 MDB_txn* txn_begin(MDB_env* const mdb, const bool write) {
+    GilUnlocker gil;
+
     const unsigned int flags = write ? 0 : MDB_RDONLY;
     MDB_txn* txn = nullptr;
     int mapsizePatience = 10;
@@ -31,16 +44,19 @@ MDB_txn* txn_begin(MDB_env* const mdb, const bool write) {
 }
 
 void txn_commit(MDB_txn* const txn) {
+    GilUnlocker gil;
     const int error = mdb_txn_commit(txn);
     if(error != 0)
         throw MdbError(error);
 }
 
 void txn_abort(MDB_txn* const txn) {
+    GilUnlocker gil;
     mdb_txn_abort(txn); // This doesn't return any errors.
 }
 
 void open_db(MDB_txn* const txn, const char* const name, unsigned int flags, MDB_dbi* const dbi) {
+    GilUnlocker gil;
     const int error = mdb_dbi_open(txn, name, flags | MDB_CREATE, dbi);
     if(error != 0)
         throw MdbError(error);
@@ -53,6 +69,7 @@ void put(
     MDB_val* const value,
     unsigned int flags
 ) {
+    GilUnlocker gil;
     const int error = mdb_put(txn, dbi, key, value, flags);
     if(error != 0)
         throw MdbError(error);
@@ -64,6 +81,7 @@ void get(
     MDB_val* const key,
     MDB_val* const value
 ) {
+    GilUnlocker gil;
     const int error = mdb_get(txn, dbi, key, value);
     if(error != 0)
         throw MdbError(error);
@@ -76,6 +94,7 @@ uint64_t putImmutable(
     const unsigned char typeCode,
     const bool readonly
 ) {
+    GilUnlocker gil;
     uint64_t key = SpookyHash::hash64(
         mdbVal->mv_data,
         mdbVal->mv_size,
@@ -103,6 +122,7 @@ uint64_t putImmutable(
 }
 
 void del(MDB_txn* const txn, MDB_dbi dbi, MDB_val* key) {
+    GilUnlocker gil;
     const int error = mdb_del(txn, dbi, key, nullptr);
     if(error != 0)
         throw MdbError(error);
