@@ -156,6 +156,15 @@ Py_hash_t OOCLazyTuple_hash(PyObject* const pySelf) {
     return result;
 }
 
+PyObject* OOCLazyTuple_richcompare(PyObject* const pySelf, PyObject* const other, int op) {
+    // TODO: optimize this (but only if it shows up on a profiler)
+    PyObject* const eager = OOCLazyTuple_eager(pySelf);
+    if(eager == nullptr) return nullptr;
+    PyObject* const result = PyObject_RichCompare(eager, other, op);
+    Py_DECREF(eager);
+    return result;
+}
+
 static PyMethodDef OOCLazyTuple_methods[] = {
     {
         "eager",
@@ -180,10 +189,11 @@ PyTypeObject OOCLazyTupleType = {
     .tp_basicsize = sizeof(OOCLazyTupleObject),
     .tp_itemsize = 0,
     .tp_dealloc = (destructor)OOCLazyTuple_dealloc,
-    .tp_hash = OOCLazyTuple_hash,
     .tp_as_sequence = &OOCLazyTuple_sequence_methods,
+    .tp_hash = OOCLazyTuple_hash,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_doc = "A tuple-like class that's backed by an OOCMap",
+    .tp_richcompare = OOCLazyTuple_richcompare,
     .tp_methods = OOCLazyTuple_methods,
     .tp_init = (initproc)OOCLazyTuple_init,
     .tp_new = OOCLazyTuple_new,
