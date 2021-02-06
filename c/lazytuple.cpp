@@ -106,7 +106,42 @@ static PyObject* OOCLazyTuple_item(PyObject* const pySelf, Py_ssize_t const inde
     }
 }
 
+PyObject* OOCLazyTuple_eager(PyObject* const pySelf) {
+    if(pySelf->ob_type != &OOCLazyTupleType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyTupleObject* const self = reinterpret_cast<OOCLazyTupleObject*>(pySelf);
+
+    MDB_txn* txn = nullptr;
+    try {
+        txn = txn_begin(self->ooc->mdb, false);
+        MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };
+        MDB_val mdbValue;
+        get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+        const Py_ssize_t size = mdbValue.mv_size / sizeof(EncodedValue);
+        PyObject* const result = PyTuple_New(size);
+        if(result == nullptr) throw OocError(OocError::OutOfMemory);
+        EncodedValue* const encodedResults = static_cast<EncodedValue* const>(mdbValue.mv_data);
+        for(Py_ssize_t i = 0; i < size; ++i)
+            PyTuple_SET_ITEM(result, i, OOCMap_decode(self->ooc, encodedResults + i, txn));
+        txn_commit(txn);
+        return result;
+    } catch(const OocError& error) {
+        if(txn != nullptr)
+            txn_abort(txn);
+        error.pythonize();
+        return nullptr;
+    }
+}
+
 static PyMethodDef OOCLazyTuple_methods[] = {
+    {
+        "eager",
+        (PyCFunction)OOCLazyTuple_eager,
+        METH_NOARGS,
+        PyDoc_STR("returns the original tuple")
+    },
     {nullptr}, // sentinel
 };
 
