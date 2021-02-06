@@ -9,7 +9,7 @@
 // These are not allowed to throw exceptions.
 //
 
-static PyObject* OOCLazyTuple_new(PyTypeObject* type, PyObject* args, PyObject* kwds) {
+static PyObject* OOCLazyTuple_new(PyTypeObject* const type, PyObject* const args, PyObject* const kwds) {
     PyObject* pySelf = type->tp_alloc(type, 0);
     OOCLazyTupleObject* self = reinterpret_cast<OOCLazyTupleObject*>(pySelf);
     if(self == nullptr) {
@@ -21,7 +21,7 @@ static PyObject* OOCLazyTuple_new(PyTypeObject* type, PyObject* args, PyObject* 
     return (PyObject*)self;
 }
 
-static int OOCLazyTuple_init(OOCLazyTupleObject* self, PyObject* args, PyObject* kwds) {
+static int OOCLazyTuple_init(OOCLazyTupleObject* const self, PyObject* const args, PyObject* const kwds) {
     // parse parameters
     static const char *kwlist[] = {"oocmap", "tuple_id", nullptr};
     PyObject* oocmapObject = nullptr;
@@ -50,12 +50,12 @@ OOCLazyTupleObject* OOCLazyTuple_fastnew(OOCMapObject* const ooc, const uint64_t
     return self;
 }
 
-static void OOCLazyTuple_dealloc(OOCLazyTupleObject* self) {
+static void OOCLazyTuple_dealloc(OOCLazyTupleObject* const self) {
     Py_DECREF(self->ooc);
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static Py_ssize_t OOCLazyTuple_length(PyObject* pySelf) {
+static Py_ssize_t OOCLazyTuple_length(PyObject* const pySelf) {
     if(pySelf->ob_type != &OOCLazyTupleType) {
         PyErr_BadArgument();
         return -1;
@@ -79,7 +79,7 @@ static Py_ssize_t OOCLazyTuple_length(PyObject* pySelf) {
     }
 }
 
-static PyObject* OOCLazyTuple_item(PyObject* pySelf, Py_ssize_t index) {
+static PyObject* OOCLazyTuple_item(PyObject* const pySelf, Py_ssize_t const index) {
     if(pySelf->ob_type != &OOCLazyTupleType) {
         PyErr_BadArgument();
         return nullptr;
