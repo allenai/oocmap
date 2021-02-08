@@ -5,6 +5,7 @@
 #include <Python.h>
 
 #include "oocmap.h"
+#include "lmdb.h"
 
 typedef struct {
     PyObject_HEAD
@@ -16,5 +17,8 @@ typedef struct {
 extern PyTypeObject OOCLazyTupleType;
 
 OOCLazyTupleObject* OOCLazyTuple_fastnew(OOCMapObject* ooc, uint64_t tupleId);
+
+PyObject* OOCLazyTupleObject_eager(OOCLazyTupleObject* self, MDB_txn* txn);
+PyObject* OOCLazyTuple_eager(PyObject* pySelf);
 
 #endif

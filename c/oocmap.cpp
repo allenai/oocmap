@@ -375,6 +375,22 @@ void OOCMap_encode(
     // Python's set objects
     // TODO
 
+    // LazyTuple objects
+    if(value->ob_type == &OOCLazyTupleType) {
+        OOCLazyTupleObject* const tupleValue = reinterpret_cast<OOCLazyTupleObject*>(value);
+        if(tupleValue->ooc == self) {
+            dest->asUInt = tupleValue->tupleId;
+            dest->typeCode = TYPE_CODE_TUPLE;
+            destInTheMap = dest;
+            return;
+        } else {
+            PyObject* const eager = OOCLazyTupleObject_eager(tupleValue, txn);
+            OOCMap_encode(self, eager, dest, txn, insertedItemsInThisTransaction, readonly);
+            destInTheMap = dest;
+            Py_DECREF(eager);
+        }
+    }
+
     throw UnknownTypeError(PyObject_Type(value));
 }
 

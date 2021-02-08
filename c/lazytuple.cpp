@@ -117,6 +117,27 @@ static PyObject* OOCLazyTuple_item(PyObject* const pySelf, Py_ssize_t const inde
     }
 }
 
+PyObject* OOCLazyTupleObject_eager(OOCLazyTupleObject* const self, MDB_txn* const txn) {
+    if(self->eager != nullptr) {
+        Py_INCREF(self->eager);
+        return self->eager;
+    }
+
+    MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };
+    MDB_val mdbValue;
+    get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+    const Py_ssize_t size = mdbValue.mv_size / sizeof(EncodedValue);
+    PyObject* const result = PyTuple_New(size);
+    if(result == nullptr) throw OocError(OocError::OutOfMemory);
+    EncodedValue* const encodedResults = static_cast<EncodedValue* const>(mdbValue.mv_data);
+    for(Py_ssize_t i = 0; i < size; ++i)
+        PyTuple_SET_ITEM(result, i, OOCMap_decode(self->ooc, encodedResults + i, txn));
+    txn_commit(txn);
+    self->eager = result;
+    Py_INCREF(result);
+    return result;
+}
+
 PyObject* OOCLazyTuple_eager(PyObject* const pySelf) {
     if(pySelf->ob_type != &OOCLazyTupleType) {
         PyErr_BadArgument();
@@ -132,19 +153,7 @@ PyObject* OOCLazyTuple_eager(PyObject* const pySelf) {
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, false);
-        MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };
-        MDB_val mdbValue;
-        get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
-        const Py_ssize_t size = mdbValue.mv_size / sizeof(EncodedValue);
-        PyObject* const result = PyTuple_New(size);
-        if(result == nullptr) throw OocError(OocError::OutOfMemory);
-        EncodedValue* const encodedResults = static_cast<EncodedValue* const>(mdbValue.mv_data);
-        for(Py_ssize_t i = 0; i < size; ++i)
-            PyTuple_SET_ITEM(result, i, OOCMap_decode(self->ooc, encodedResults + i, txn));
-        txn_commit(txn);
-        self->eager = result;
-        Py_INCREF(result);
-        return result;
+        return OOCLazyTupleObject_eager(self, txn);
     } catch(const OocError& error) {
         if(txn != nullptr)
             txn_abort(txn);
