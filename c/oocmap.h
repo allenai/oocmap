@@ -20,7 +20,12 @@ typedef struct {
     MDB_dbi dictsDb;
 } OOCMapObject;
 
-#pragma pack(1)
+#pragma pack(push, 1)
+
+struct ListKey {
+    uint32_t listId;
+    uint32_t listIndex;
+};
 
 struct EncodedValue {
     union {
@@ -28,10 +33,7 @@ struct EncodedValue {
         int64_t asInt;
         uint64_t asUInt;
         double asFloat;
-        struct {
-            uint32_t listId;
-            uint32_t listIndex;
-        } asListKey;
+        ListKey asListKey;
         struct {
             uint32_t dictId;
             uint32_t reserved;
@@ -58,7 +60,8 @@ struct EncodedValue {
 };
 _Static_assert(sizeof(EncodedValue) == 9, "EncodedValue must be 9 bytes in size.");
 
-#pragma options align=reset
+#pragma pack(pop)
+
 
 // This is seriously how to write a custom hash function, no joke 🙄
 namespace std {
@@ -87,5 +90,29 @@ void OOCMap_encode(
     bool readonly = false
 );
 PyObject* OOCMap_decode(OOCMapObject* self, EncodedValue* encodedValue, MDB_txn* txn);
+
+
+const uint8_t TYPE_CODE_HARDCODED = 0;
+const uint8_t TYPE_CODE_SHORT_POSITIVE_INT = 1;
+const uint8_t TYPE_CODE_SHORT_NEGATIVE_INT = 2;
+const uint8_t TYPE_CODE_LONG_POSITIVE_INT = 3;
+const uint8_t TYPE_CODE_LONG_NEGATIVE_INT = 4;
+const uint8_t TYPE_CODE_FLOAT = 5;
+const uint8_t TYPE_CODE_UNICODE_SHORT_WCHAR = 6;
+const uint8_t TYPE_CODE_UNICODE_SHORT_1BYTE = 7;
+const uint8_t TYPE_CODE_UNICODE_SHORT_2BYTE = 8;
+const uint8_t TYPE_CODE_UNICODE_SHORT_4BYTE = 9;
+const uint8_t TYPE_CODE_UNICODE_LONG_WCHAR = 10; static const uint8_t TYPE_CODE_UNICODE_LONG_SHORT_OFFSET = TYPE_CODE_UNICODE_LONG_WCHAR - TYPE_CODE_UNICODE_SHORT_WCHAR;
+const uint8_t TYPE_CODE_UNICODE_LONG_1BYTE = 11;
+const uint8_t TYPE_CODE_UNICODE_LONG_2BYTE = 12;
+const uint8_t TYPE_CODE_UNICODE_LONG_4BYTE = 13;
+const uint8_t TYPE_CODE_TUPLE = 14;
+const uint8_t TYPE_CODE_LIST = 15;
+const uint8_t TYPE_CODE_DICT = 16;
+const uint8_t TYPE_CODE_SET = 17;
+const uint8_t TYPE_CODE_COMPLEX = 18;
+const uint8_t TYPE_CODE_BYTES = 19;
+const uint8_t TYPE_CODE_BYTEARRAY = 20;
+
 
 #endif

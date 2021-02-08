@@ -127,3 +127,28 @@ void del(MDB_txn* const txn, MDB_dbi dbi, MDB_val* key) {
     if(error != 0)
         throw MdbError(error);
 }
+
+MDB_cursor* cursor_open(MDB_txn* const txn, const MDB_dbi dbi) {
+    MDB_cursor* result;
+    const int error = mdb_cursor_open(txn, dbi, &result);
+    if(error != 0)
+        throw MdbError(error);
+    return result;
+}
+
+void cursor_close(MDB_cursor* const cursor) {
+    mdb_cursor_close(cursor);
+    // Apparently this never fails?
+}
+
+void cursor_get(
+    MDB_cursor* const cursor,
+    MDB_val* const key,
+    MDB_val* const data,
+    const MDB_cursor_op op
+) {
+    GilUnlocker gil;
+    const int error = mdb_cursor_get(cursor, key, data, op);
+    if(error != 0)
+        throw MdbError(error);
+}

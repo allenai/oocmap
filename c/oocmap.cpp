@@ -7,6 +7,7 @@
 #include "errors.h"
 #include "db.h"
 #include "lazytuple.h"
+#include "lazylist.h"
 
 static std::mt19937 random_engine(std::chrono::system_clock::now().time_since_epoch().count());
 
@@ -22,28 +23,6 @@ struct DictItemKey {
 // Functions that are not exposed to Python
 // These are allowed to throw exceptions.
 //
-
-static const uint8_t TYPE_CODE_HARDCODED = 0;
-static const uint8_t TYPE_CODE_SHORT_POSITIVE_INT = 1;
-static const uint8_t TYPE_CODE_SHORT_NEGATIVE_INT = 2;
-static const uint8_t TYPE_CODE_LONG_POSITIVE_INT = 3;
-static const uint8_t TYPE_CODE_LONG_NEGATIVE_INT = 4;
-static const uint8_t TYPE_CODE_FLOAT = 5;
-static const uint8_t TYPE_CODE_UNICODE_SHORT_WCHAR = 6;
-static const uint8_t TYPE_CODE_UNICODE_SHORT_1BYTE = 7;
-static const uint8_t TYPE_CODE_UNICODE_SHORT_2BYTE = 8;
-static const uint8_t TYPE_CODE_UNICODE_SHORT_4BYTE = 9;
-static const uint8_t TYPE_CODE_UNICODE_LONG_WCHAR = 10; static const uint8_t TYPE_CODE_UNICODE_LONG_SHORT_OFFSET = TYPE_CODE_UNICODE_LONG_WCHAR - TYPE_CODE_UNICODE_SHORT_WCHAR;
-static const uint8_t TYPE_CODE_UNICODE_LONG_1BYTE = 11;
-static const uint8_t TYPE_CODE_UNICODE_LONG_2BYTE = 12;
-static const uint8_t TYPE_CODE_UNICODE_LONG_4BYTE = 13;
-static const uint8_t TYPE_CODE_TUPLE = 14;
-static const uint8_t TYPE_CODE_LIST = 15;
-static const uint8_t TYPE_CODE_DICT = 16;
-static const uint8_t TYPE_CODE_SET = 17;
-static const uint8_t TYPE_CODE_COMPLEX = 18;
-static const uint8_t TYPE_CODE_BYTES = 19;
-static const uint8_t TYPE_CODE_BYTEARRAY = 20;
 
 // hardcoded values
 static const EncodedValue ENCODED_NONE = {.asInt = 0, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
@@ -526,7 +505,7 @@ PyObject* OOCMap_decode(
     case TYPE_CODE_TUPLE:
         return reinterpret_cast<PyObject*>(OOCLazyTuple_fastnew(self, encodedValue->asUInt));
     case TYPE_CODE_LIST:
-        // TODO
+        return reinterpret_cast<PyObject*>(OOCLazyList_fastnew(self, encodedValue->asUInt));
     case TYPE_CODE_DICT:
         // TODO
     default:

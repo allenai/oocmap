@@ -6,6 +6,7 @@ oocmap_module = Extension(
         'module.cpp',
         'oocmap.cpp',
         'lazytuple.cpp',
+        'lazylist.cpp',
         'errors.cpp',
         'db.cpp',
         'mdb.c',
