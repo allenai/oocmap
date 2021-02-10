@@ -188,6 +188,66 @@ static PyObject* OOCLazyList_item(PyObject* const pySelf, Py_ssize_t const index
     }
 }
 
+PyObject* OOCLazyList_eager(PyObject* const pySelf) {
+    if(pySelf->ob_type != &OOCLazyListType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
+
+    MDB_txn* txn = nullptr;
+    try {
+        txn = txn_begin(self->ooc->mdb, false);
+        return OOCLazyListObject_eager(self, txn);
+    } catch(const OocError& error) {
+        if(txn != nullptr)
+            txn_abort(txn);
+        error.pythonize();
+        return nullptr;
+    }
+}
+
+PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, MDB_txn* const txn) {
+    const Py_ssize_t length = OOCLazyListObject_length(self, txn);
+    PyObject* result = nullptr;
+    MDB_cursor* cursor = nullptr;
+    try {
+        result = PyList_New(length);
+        if(result == nullptr) throw OocError(OocError::OutOfMemory);
+        if(length <= 0) return result;
+        cursor = cursor_open(txn, self->ooc->listsDb);
+
+        ListKey encodedListKey = {
+            .listId = self->listId,
+            .listIndex = 0
+        };
+        MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
+        MDB_val mdbValue;
+        cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
+
+        while(true) {
+            if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
+            EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
+            PyObject* const item = OOCMap_decode(self->ooc, encodedResult, txn);
+            PyList_SET_ITEM(result, encodedListKey.listIndex, item);
+
+            cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
+            if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
+            ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
+            if(listKey->listId != self->listId) break;
+        }
+
+        cursor_close(cursor);
+    } catch(...) {
+        if(result != nullptr) Py_DECREF(result);
+        if(cursor != nullptr) cursor_close(cursor);
+        throw;
+    }
+
+    return result;
+}
+
+
 static PyObject* OOCLazyList_iter(PyObject* const pySelf) {
     if(pySelf->ob_type != &OOCLazyListType) {
         PyErr_BadArgument();
