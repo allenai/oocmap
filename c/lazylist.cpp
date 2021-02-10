@@ -234,6 +234,7 @@ PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, MDB_txn* const 
             cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
             if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
             ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
+            if(listKey->listIndex == std::numeric_limits<uint32_t>::max()) break;
             if(listKey->listId != self->listId) break;
         }
 
@@ -296,9 +297,7 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             }
             if(error.errorCode == OocError::IndexError) {
                 txn_commit(txn);
-                Py_DECREF(self->ooc);
-                self->ooc = nullptr;
-                PyErr_Format(PyExc_StopIteration, "");
+                Py_CLEAR(self->ooc);
             } else {
                 if(txn != nullptr)
                     txn_abort(txn);
@@ -314,7 +313,12 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_NEXT);
             if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
             ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
-            if(listKey->listId != self->listId) throw OocError(OocError::IndexError);
+            if(
+                listKey->listIndex == std::numeric_limits<uint32_t>::max() ||
+                listKey->listId != self->listId
+            ) {
+                throw OocError(OocError::IndexError);
+            }
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
             return OOCMap_decode(self->ooc, encodedResult, txn);
@@ -323,9 +327,7 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             self->cursor = nullptr;
             if(error.errorCode == OocError::IndexError) {
                 txn_commit(txn);
-                Py_DECREF(self->ooc);
-                self->ooc = nullptr;
-                PyErr_Format(PyExc_StopIteration, "");
+                Py_CLEAR(self->ooc);
             } else {
                 txn_abort(txn);
                 error.pythonize();
@@ -398,10 +400,7 @@ PyObject* OOCLazyList_richcompare(PyObject* const pySelf, PyObject* const other,
 
         while(true) {
             PyObject* const selfItem = PyIter_Next(selfIter);
-            if(selfItem == nullptr && !PyErr_ExceptionMatches(PyExc_StopIteration)) return nullptr;
             PyObject* const otherItem = PyIter_Next(otherIter);
-            if(otherItem == nullptr && !PyErr_ExceptionMatches(PyExc_StopIteration)) return nullptr;
-            PyErr_Clear();
 
             if(selfItem == nullptr && otherItem == nullptr) {
                 // Both iterators are at the end, and they compared the same all the way though.
