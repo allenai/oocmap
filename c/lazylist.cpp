@@ -156,18 +156,15 @@ static PyObject* OOCLazyList_item(PyObject* const pySelf, Py_ssize_t const index
     }
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
 
-    EncodedValue encodedListKey = {
-        .asListKey = {
-            .listId = self->listId,
-            .listIndex = index
-        },
-        .typeCode = TYPE_CODE_LIST
+    ListKey encodedListKey = {
+        .listId = self->listId,
+        .listIndex = index
     };
 
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, false);
-        MDB_val mdbKey = { .mv_size = sizeof(encodedListKey.asUInt), .mv_data = &encodedListKey.asUInt };
+        MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
         MDB_val mdbValue;
         try {
             get(txn, self->ooc->listsDb, &mdbKey, &mdbValue);
@@ -221,14 +218,11 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             txn = txn_begin(self->ooc->mdb, false);
             self->cursor = cursor_open(txn, self->ooc->listsDb);
 
-            EncodedValue encodedListKey = {
-                .asListKey = {
-                    .listId = self->listId,
-                    .listIndex = 0
-                },
-                .typeCode = TYPE_CODE_LIST
+            ListKey encodedListKey = {
+                .listId = self->listId,
+                .listIndex = 0
             };
-            MDB_val mdbKey = { .mv_size = sizeof(encodedListKey.asUInt), .mv_data = &encodedListKey.asUInt };
+            MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
             MDB_val mdbValue;
             cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
