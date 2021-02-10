@@ -21,6 +21,8 @@ extern PyTypeObject OOCLazyListType;
 
 OOCLazyListObject* OOCLazyList_fastnew(OOCMapObject* ooc, uint64_t listId);
 
+Py_ssize_t OOCLazyListObject_length(OOCLazyListObject* self, MDB_txn* txn);
+
 PyObject* OOCLazyListObject_eager(OOCLazyListObject* self, MDB_txn* txn);
 PyObject* OOCLazyList_eager(PyObject* pySelf);
 
