@@ -129,7 +129,7 @@ static PyObject* OOCLazyTuple_item(PyObject* const pySelf, Py_ssize_t const inde
         MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };
         MDB_val mdbValue;
         get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
-        if(index < 0 || index > mdbValue.mv_size / sizeof(EncodedValue))
+        if(index < 0 || index > static_cast<Py_ssize_t>(mdbValue.mv_size / sizeof(EncodedValue)))
             throw OocError(OocError::IndexError);
         EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data) + index;
         PyObject* const result = OOCMap_decode(self->ooc, encodedResult, txn);
