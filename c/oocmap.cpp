@@ -236,7 +236,7 @@ void OOCMap_encode(
         // find a key
         while(true) {
             dest->asListKey.listId = random_engine();
-            MDB_val mdbValue = { .mv_size = sizeof(PyList_GET_SIZE(value)), .mv_data = &PyList_GET_SIZE(value)};
+            MDB_val mdbValue = { .mv_size = sizeof(Py_ssize_t), .mv_data = &Py_SIZE(value)};
             try {
                 put(txn, self->listsDb, &mdbKey, &mdbValue, MDB_NODUPDATA);
             } catch(const MdbError& e) {
