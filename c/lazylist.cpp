@@ -270,10 +270,7 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
         return nullptr;
     }
     OOCLazyListIterObject* const self = reinterpret_cast<OOCLazyListIterObject*>(pySelf);
-    if(self->ooc == nullptr) {
-        PyErr_Format(PyExc_StopIteration, "");
-        return nullptr;
-    }
+    if(self->ooc == nullptr) return nullptr;
 
     if(self->cursor == nullptr) {
         MDB_txn* txn = nullptr;
@@ -282,8 +279,8 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             self->cursor = cursor_open(txn, self->ooc->listsDb);
 
             ListKey encodedListKey = {
-                .listId = self->listId,
-                .listIndex = 0
+                .listIndex = 0,
+                .listId = self->listId
             };
             MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
             MDB_val mdbValue;
