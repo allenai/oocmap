@@ -23,8 +23,12 @@ typedef struct {
 #pragma pack(push, 1)
 
 struct ListKey {
-    uint32_t listId;
+    // The order of these matters, since this struct is taken together
+    // as a uint64 and compared, and we need to make sure that adjacent
+    // list items are compared adjacently and in the right order.
+    // On a big-endian platform, these will likely have to be reversed.
     uint32_t listIndex;
+    uint32_t listId;
 };
 
 struct EncodedValue {

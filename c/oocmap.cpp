@@ -231,7 +231,7 @@ void OOCMap_encode(
     if(PyList_CheckExact(value)) {
         dest->typeCode = TYPE_CODE_LIST;
         dest->asListKey.listIndex = std::numeric_limits<uint32_t>::max();
-        MDB_val mdbKey = { .mv_size = sizeof(dest->asUInt), .mv_data = &dest->asUInt };
+        MDB_val mdbKey = { .mv_size = sizeof(dest->asListKey), .mv_data = &dest->asListKey };
 
         // find a key
         while(true) {
@@ -255,8 +255,8 @@ void OOCMap_encode(
             // add the list elements
             EncodedValue encodedListElement = *dest;
             MDB_val mdbElementKey = {
-                .mv_size = sizeof(encodedListElement.asUInt),
-                .mv_data = &encodedListElement.asUInt
+                .mv_size = sizeof(encodedListElement.asListKey),
+                .mv_data = &encodedListElement.asListKey
             };
 
             for(Py_ssize_t i = 0; i < PyList_GET_SIZE(value); ++i) {
@@ -364,6 +364,31 @@ void OOCMap_encode(
             return;
         } else {
             PyObject* const eager = OOCLazyTupleObject_eager(tupleValue, txn);
+            OOCMap_encode(self, eager, dest, txn, insertedItemsInThisTransaction, readonly);
+            destInTheMap = dest;
+            Py_DECREF(eager);
+        }
+    }
+
+    // LazyList objects
+    if(value->ob_type == &OOCLazyListType) {
+        OOCLazyListObject* const listValue = reinterpret_cast<OOCLazyListObject*>(value);
+        if(listValue->ooc == self) {
+            dest->asListKey.listId = listValue->listId;
+            dest->asListKey.listIndex = std::numeric_limits<uint32_t>::max();
+            dest->typeCode = TYPE_CODE_LIST;
+            destInTheMap = dest;
+            return;
+        } else {
+            MDB_txn* otherTxn = txn_begin(listValue->ooc->mdb);
+            PyObject* eager;
+            try {
+                eager = OOCLazyListObject_eager(listValue, otherTxn);
+                txn_commit(otherTxn);
+            } catch(...) {
+                txn_abort(otherTxn);
+                throw;
+            }
             OOCMap_encode(self, eager, dest, txn, insertedItemsInThisTransaction, readonly);
             destInTheMap = dest;
             Py_DECREF(eager);
@@ -505,7 +530,7 @@ PyObject* OOCMap_decode(
     case TYPE_CODE_TUPLE:
         return reinterpret_cast<PyObject*>(OOCLazyTuple_fastnew(self, encodedValue->asUInt));
     case TYPE_CODE_LIST:
-        return reinterpret_cast<PyObject*>(OOCLazyList_fastnew(self, encodedValue->asUInt));
+        return reinterpret_cast<PyObject*>(OOCLazyList_fastnew(self, encodedValue->asListKey.listId));
     case TYPE_CODE_DICT:
         // TODO
     default:

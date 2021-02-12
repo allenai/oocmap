@@ -19,7 +19,7 @@ typedef struct {
 
 extern PyTypeObject OOCLazyListType;
 
-OOCLazyListObject* OOCLazyList_fastnew(OOCMapObject* ooc, uint64_t listId);
+OOCLazyListObject* OOCLazyList_fastnew(OOCMapObject* ooc, uint32_t listId);
 
 Py_ssize_t OOCLazyListObject_length(OOCLazyListObject* self, MDB_txn* txn);
 
@@ -40,7 +40,7 @@ typedef struct {
 
 extern PyTypeObject OOCLazyListIterType;
 
-OOCLazyListIterObject* OOCLazyListIter_fastnew(OOCMapObject* ooc, uint64_t listId);
+OOCLazyListIterObject* OOCLazyListIter_fastnew(OOCMapObject* ooc, uint32_t listId);
 
 
 #endif
