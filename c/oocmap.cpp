@@ -363,10 +363,19 @@ void OOCMap_encode(
             destInTheMap = dest;
             return;
         } else {
-            PyObject* const eager = OOCLazyTupleObject_eager(tupleValue, txn);
+            MDB_txn* otherTxn = txn_begin(tupleValue->ooc->mdb);
+            PyObject* eager;
+            try {
+                eager = OOCLazyTupleObject_eager(tupleValue, otherTxn);
+                txn_commit(otherTxn);
+            } catch(...) {
+                txn_abort(otherTxn);
+                throw;
+            }
             OOCMap_encode(self, eager, dest, txn, insertedItemsInThisTransaction, readonly);
             destInTheMap = dest;
             Py_DECREF(eager);
+            return;
         }
     }
 
@@ -392,6 +401,7 @@ void OOCMap_encode(
             OOCMap_encode(self, eager, dest, txn, insertedItemsInThisTransaction, readonly);
             destInTheMap = dest;
             Py_DECREF(eager);
+            return;
         }
     }
 
