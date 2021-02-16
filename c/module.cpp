@@ -3,6 +3,7 @@
 #include "oocmap.h"
 #include "lazytuple.h"
 #include "lazylist.h"
+#include "lazydict.h"
 
 static PyMethodDef OocmapMethods[] = {
     {nullptr, nullptr, 0, nullptr}        /* Sentinel */
@@ -25,6 +26,8 @@ PyMODINIT_FUNC PyInit_oocmap() {
         return nullptr;
     if(PyType_Ready(&OOCLazyListIterType) < 0)
         return nullptr;
+    if(PyType_Ready(&OOCLazyDictType) < 0)
+        return nullptr;
 
     PyObject* const m = PyModule_Create(&oocmap_module);
     if(m == nullptr)
@@ -34,16 +37,19 @@ PyMODINIT_FUNC PyInit_oocmap() {
     Py_INCREF(&OOCLazyTupleType);
     Py_INCREF(&OOCLazyListType);
     Py_INCREF(&OOCLazyListIterType);
+    Py_INCREF(&OOCLazyDictType);
     if(
         PyModule_AddObject(m, "OOCMap", (PyObject*)&OOCMapType) < 0 ||
         PyModule_AddObject(m, "LazyTuple", (PyObject*)&OOCLazyTupleType) < 0 ||
         PyModule_AddObject(m, "LazyList", (PyObject*)&OOCLazyListType) < 0 ||
-        PyModule_AddObject(m, "LazyListIter", (PyObject*)&OOCLazyListIterType) < 0
+        PyModule_AddObject(m, "LazyListIter", (PyObject*)&OOCLazyListIterType) < 0 ||
+        PyModule_AddObject(m, "LazyDict", (PyObject*)&OOCLazyDictType) < 0
     ) {
         Py_DECREF(&OOCMapType);
         Py_DECREF(&OOCLazyTupleType);
         Py_DECREF(&OOCLazyListType);
         Py_DECREF(&OOCLazyListIterType);
+        Py_DECREF(&OOCLazyDictType);
         Py_DECREF(m);
         return nullptr;
     }

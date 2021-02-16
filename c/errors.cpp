@@ -7,6 +7,8 @@ void OocError::pythonize() const {
     case NoError:
         PyErr_Format(PyExc_ValueError, "Error: There is no error.");
         break;
+    case AlreadyPythonizedError:
+        break;
     case ImmutableValueNotFound:
         PyErr_Format(PyExc_ValueError, "Tried to write a non-existant immutable value into the DB in a readonly transaction.");
         break;

@@ -8,6 +8,7 @@
 struct OocError : std::exception {
     const enum ErrorCode {
         NoError,
+        AlreadyPythonizedError, // thrown when Python has already set the error state
         ImmutableValueNotFound,
         InvalidBool,
         CouldNotReadyString,

@@ -11,7 +11,7 @@ add_library(oocmap SHARED
         module.cpp
         oocmap.cpp
         mdb.c
-        midl.c spooky.h spooky.cpp oocmap.h lazytuple.h lazytuple.cpp errors.h errors.cpp db.h db.cpp lazylist.h lazylist.cpp)
+        midl.c spooky.h spooky.cpp oocmap.h lazytuple.h lazytuple.cpp errors.h errors.cpp db.h db.cpp lazylist.h lazylist.cpp lazydict.h lazydict.cpp)
 set_target_properties(
         oocmap
         PROPERTIES

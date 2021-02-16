@@ -8,15 +8,9 @@
 #include "db.h"
 #include "lazytuple.h"
 #include "lazylist.h"
+#include "lazydict.h"
 
 static std::mt19937 random_engine(std::chrono::system_clock::now().time_since_epoch().count());
-
-// This is the structure that defines the keys in the dicts table. Dicts are different
-// because the keys are not integers but variable-length.
-struct DictItemKey {
-    uint32_t dictId;
-    EncodedValue key;
-};
 
 
 //
@@ -39,6 +33,7 @@ void OOCMap_encode(
     MDB_txn* const txn,
     Id2EncodedMap& insertedItemsInThisTransaction,
     const bool readonly
+    // TODO: failOnMutable flag so we can fail when we use mutable items as dictionary keys
 ) {
     // Python's cell objects
     if(PyCell_Check(value)) {
@@ -405,6 +400,32 @@ void OOCMap_encode(
         }
     }
 
+    // LazyDict objects
+    if(value->ob_type == &OOCLazyDictType) {
+        OOCLazyDictObject* const dictValue = reinterpret_cast<OOCLazyDictObject*>(value);
+        if(dictValue->ooc == self) {
+            dest->asDictKey.dictId = dictValue->dictId;
+            dest->asDictKey.reserved = 0;
+            dest->typeCode = TYPE_CODE_DICT;
+            destInTheMap = dest;
+            return;
+        } else {
+            MDB_txn* otherTxn = txn_begin(dictValue->ooc->mdb);
+            PyObject* eager;
+            try {
+                eager = OOCLazyDictObject_eager(dictValue, otherTxn);
+                txn_commit(otherTxn);
+            } catch(...) {
+                txn_abort(otherTxn);
+                throw;
+            }
+            OOCMap_encode(self, eager, dest, txn, insertedItemsInThisTransaction, readonly);
+            destInTheMap = dest;
+            Py_DECREF(eager);
+            return;
+        }
+    }
+
     throw UnknownTypeError(PyObject_Type(value));
 }
 
@@ -542,7 +563,7 @@ PyObject* OOCMap_decode(
     case TYPE_CODE_LIST:
         return reinterpret_cast<PyObject*>(OOCLazyList_fastnew(self, encodedValue->asListKey.listId));
     case TYPE_CODE_DICT:
-        // TODO
+        return reinterpret_cast<PyObject*>(OOCLazyDict_fastnew(self, encodedValue->asDictKey.dictId));
     default:
         throw OocError(OocError::UnknownType);
     }

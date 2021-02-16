@@ -31,6 +31,11 @@ struct ListKey {
     uint32_t listId;
 };
 
+struct DictKey {
+    uint32_t dictId;
+    uint32_t reserved;
+};
+
 struct EncodedValue {
     union {
         uint8_t asChars[8];
@@ -38,10 +43,7 @@ struct EncodedValue {
         uint64_t asUInt;
         double asFloat;
         ListKey asListKey;
-        struct {
-            uint32_t dictId;
-            uint32_t reserved;
-        } asDictKey;
+        DictKey asDictKey;
     };
     union {
         struct {
@@ -63,6 +65,13 @@ struct EncodedValue {
     }
 };
 _Static_assert(sizeof(EncodedValue) == 9, "EncodedValue must be 9 bytes in size.");
+
+// This is the structure that defines the keys in the dicts table. Dicts are different
+// because the keys are not integers but variable-length.
+struct DictItemKey {
+    uint32_t dictId;
+    EncodedValue key;
+};
 
 #pragma pack(pop)
 
