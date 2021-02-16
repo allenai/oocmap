@@ -614,7 +614,7 @@ static int OOCMap_init(OOCMapObject* self, PyObject* args, PyObject* kwds) {
     const char* filename = PyBytes_AS_STRING(filenameObject);
 
     // set mapsize
-    if(mapsize == 0) mapsize = 1024ull * 1024ull * 1024ull * 1024ull;
+    if(mapsize == 0) mapsize = 1024ull * 1024ull * 1024ull;
     const int setMapsizeError = mdb_env_set_mapsize(self->mdb, mapsize);
     if(setMapsizeError != 0) {
         Py_XDECREF(filenameObject);
@@ -627,7 +627,7 @@ static int OOCMap_init(OOCMapObject* self, PyObject* args, PyObject* kwds) {
     const int mdbOpenError = mdb_env_open(
             self->mdb,
             filename,
-            MDB_NOSUBDIR | MDB_WRITEMAP | MDB_NOMETASYNC| MDB_MAPASYNC | MDB_NOMEMINIT | MDB_NOTLS,
+            MDB_NOSUBDIR | MDB_NOSYNC | MDB_WRITEMAP | MDB_NOMETASYNC| MDB_MAPASYNC | MDB_NOMEMINIT | MDB_NOTLS,
             0644);
     Py_CLEAR(filenameObject);
     if(mdbOpenError != 0) {
