@@ -107,7 +107,7 @@ static void OOCLazyList_dealloc(OOCLazyListObject* const self) {
 }
 
 static void OOCLazyListIter_dealloc(OOCLazyListIterObject* const self) {
-    Py_DECREF(self->ooc);
+    Py_XDECREF(self->ooc);
     if(self->cursor != nullptr) {
         MDB_txn* const txn = mdb_cursor_txn(self->cursor);
         mdb_cursor_close(self->cursor);
