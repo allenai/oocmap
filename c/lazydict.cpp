@@ -19,6 +19,26 @@ OOCLazyDictObject* OOCLazyDict_fastnew(OOCMapObject* const ooc, const uint32_t d
     return self;
 }
 
+OOCLazyDictItemsObject* OOCLazyDictItems_fastnew(OOCLazyDictObject* const dict) {
+    PyObject* const pySelf = OOCLazyDictItemsType.tp_alloc(&OOCLazyDictItemsType, 0);
+    if(pySelf == nullptr) throw OocError(OocError::OutOfMemory);
+    OOCLazyDictItemsObject* self = reinterpret_cast<OOCLazyDictItemsObject*>(pySelf);
+    self->dict = dict;
+    Py_INCREF(dict);
+    return self;
+}
+
+OOCLazyDictItemsIterObject* OOCLazyDictItemsIter_fastnew(OOCLazyDictObject* const dict) {
+    PyObject* const pySelf = OOCLazyDictItemsIterType.tp_alloc(&OOCLazyDictItemsIterType, 0);
+    if(pySelf == nullptr) throw OocError(OocError::OutOfMemory);
+    OOCLazyDictItemsIterObject* self = reinterpret_cast<OOCLazyDictItemsIterObject*>(pySelf);
+    self->dict = dict;
+    self->cursor = nullptr;
+    Py_INCREF(dict);
+    return self;
+}
+
+
 //
 // Methods that are directly exposed to Python
 // These are not allowed to throw exceptions.
@@ -33,6 +53,29 @@ static PyObject* OOCLazyDict_new(PyTypeObject* const type, PyObject* const args,
     }
     self->ooc = nullptr;
     self->dictId = 0;
+    return (PyObject*)self;
+}
+
+static PyObject* OOCLazyDictItems_new(PyTypeObject* const type, PyObject* const args, PyObject* const kwds) {
+    PyObject* pySelf = type->tp_alloc(type, 0);
+    OOCLazyDictItemsObject* self = reinterpret_cast<OOCLazyDictItemsObject*>(pySelf);
+    if(self == nullptr) {
+        PyErr_NoMemory();
+        return nullptr;
+    }
+    self->dict = nullptr;
+    return (PyObject*)self;
+}
+
+static PyObject* OOCLazyDictItemsIter_new(PyTypeObject* const type, PyObject* const args, PyObject* const kwds) {
+    PyObject* pySelf = type->tp_alloc(type, 0);
+    OOCLazyDictItemsIterObject* self = reinterpret_cast<OOCLazyDictItemsIterObject*>(pySelf);
+    if(self == nullptr) {
+        PyErr_NoMemory();
+        return nullptr;
+    }
+    self->dict = nullptr;
+    self->cursor = nullptr;
     return (PyObject*)self;
 }
 
@@ -56,8 +99,64 @@ static int OOCLazyDict_init(OOCLazyDictObject* const self, PyObject* const args,
     return 0;
 }
 
+static int OOCLazyDictItems_init(OOCLazyDictItemsObject* const self, PyObject* const args, PyObject* const kwds) {
+    // parse parameters
+    static const char *kwlist[] = {"dict", nullptr};
+    PyObject* dictObject = nullptr;
+    const int parseSuccess = PyArg_ParseTupleAndKeywords(
+        args,
+        kwds,
+        "O",
+        const_cast<char**>(kwlist),
+        &OOCLazyDictType, &dictObject);
+    if(!parseSuccess)
+        return -1;
+
+    // TODO: consider that __init__ might be called on an already initialized object
+    self->dict = reinterpret_cast<OOCLazyDictObject*>(dictObject);
+    Py_INCREF(dictObject);
+
+    return 0;
+}
+
+static int OOCLazyDictItemsIter_init(OOCLazyDictItemsIterObject* const self, PyObject* const args, PyObject* const kwds) {
+    // parse parameters
+    static const char *kwlist[] = {"dict", nullptr};
+    PyObject* dictObject = nullptr;
+    const int parseSuccess = PyArg_ParseTupleAndKeywords(
+        args,
+        kwds,
+        "O",
+        const_cast<char**>(kwlist),
+        &OOCLazyDictType, &dictObject);
+    if(!parseSuccess)
+        return -1;
+
+    // TODO: consider that __init__ might be called on an already initialized object
+    self->dict = reinterpret_cast<OOCLazyDictObject*>(dictObject);
+    Py_INCREF(dictObject);
+    self->cursor = nullptr;
+
+    return 0;
+}
+
 static void OOCLazyDict_dealloc(OOCLazyDictObject* const self) {
     Py_DECREF(self->ooc);
+    Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+static void OOCLazyDictItems_dealloc(OOCLazyDictItemsObject* const self) {
+    Py_DECREF(self->dict);
+    Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+static void OOCLazyDictItemsIter_dealloc(OOCLazyDictItemsIterObject* const self) {
+    Py_DECREF(self->dict);
+    if(self->cursor != nullptr) {
+        MDB_txn* const txn = mdb_cursor_txn(self->cursor);
+        mdb_cursor_close(self->cursor);
+        txn_abort(txn);
+    }
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -88,6 +187,15 @@ Py_ssize_t OOCLazyDictObject_length(OOCLazyDictObject* const self, MDB_txn* cons
     get(txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
     if(mdbValue.mv_size != sizeof(Py_ssize_t)) throw OocError(OocError::UnexpectedData);
     return *reinterpret_cast<Py_ssize_t*>(mdbValue.mv_data);
+}
+
+static Py_ssize_t OOCLazyDictItems_length(PyObject* const pySelf) {
+    if(pySelf->ob_type != &OOCLazyDictItemsType) {
+        PyErr_BadArgument();
+        return -1;
+    }
+    OOCLazyDictItemsObject* const self = reinterpret_cast<OOCLazyDictItemsObject*>(pySelf);
+    return OOCLazyDict_length(reinterpret_cast<PyObject*>(self->dict));
 }
 
 static int OOCLazyDict_insert(PyObject* pySelf, PyObject* key, PyObject* value) {
@@ -221,6 +329,100 @@ PyObject* OOCLazyDictObject_eager(OOCLazyDictObject* const self, MDB_txn* const 
     return result;
 }
 
+static PyObject* OOCLazyDictItems_iter(PyObject* const pySelf) {
+    if(pySelf->ob_type != &OOCLazyDictItemsType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyDictItemsObject* const self = reinterpret_cast<OOCLazyDictItemsObject*>(pySelf);
+    return reinterpret_cast<PyObject*>(OOCLazyDictItemsIter_fastnew(self->dict));
+}
+
+static PyObject* OOCLazyDictItemsIter_iter(PyObject* const pySelf) {
+    Py_INCREF(pySelf);
+    return pySelf;
+}
+
+static PyObject* OOCLazyDictItemsIter_iternext(PyObject* const pySelf) {
+    if(pySelf->ob_type != &OOCLazyDictItemsIterType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyDictItemsIterObject* const self = reinterpret_cast<OOCLazyDictItemsIterObject*>(pySelf);
+    if(self->dict == nullptr) return nullptr;
+    OOCMapObject* const ooc = self->dict->ooc;
+
+    MDB_txn* txn = nullptr;
+    if(self->cursor == nullptr) {
+        try {
+            txn = txn_begin(ooc->mdb, false);
+            self->cursor = cursor_open(txn, ooc->dictsDb);
+
+            MDB_val mdbKey = { .mv_size = sizeof(self->dict->dictId), .mv_data = &self->dict->dictId };
+            MDB_val mdbValue;
+            cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_SET);
+        } catch(const OocError& error) {
+            if(self->cursor != nullptr) {
+                cursor_close(self->cursor);
+                self->cursor = nullptr;
+            }
+            if(txn != nullptr)
+                txn_abort(txn);
+            error.pythonize();
+            return nullptr;
+        }
+    } else {
+        txn = mdb_cursor_txn(self->cursor);
+    }
+    assert(txn != nullptr);
+
+    PyObject* pyKey = nullptr;
+    PyObject* pyValue = nullptr;
+    try {
+        MDB_val mdbKey;
+        MDB_val mdbValue;
+        cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_NEXT);
+
+        switch(mdbKey.mv_size) {
+        case sizeof(DictItemKey):
+            break;
+        case sizeof(self->dict->dictId):
+            throw OocError(OocError::IndexError);
+        default:
+            throw OocError(OocError::UnexpectedData);
+        }
+        DictItemKey* const dictItemKey = static_cast<DictItemKey* const>(mdbKey.mv_data);
+
+        if(mdbValue.mv_size != sizeof(EncodedValue))
+            throw OocError(OocError::UnexpectedData);
+        EncodedValue* const dictItemValue = static_cast<EncodedValue* const>(mdbValue.mv_data);
+
+        pyKey = OOCMap_decode(ooc, &dictItemKey->key, txn);
+        pyValue = OOCMap_decode(ooc, dictItemValue, txn);
+    } catch(const OocError& error) {
+        cursor_close(self->cursor);
+        self->cursor = nullptr;
+        if(error.errorCode == OocError::IndexError) {
+            txn_commit(txn);
+            Py_CLEAR(self->dict);
+        } else {
+            txn_abort(txn);
+            error.pythonize();
+        }
+        return nullptr;
+    }
+
+    PyObject* const result = PyTuple_New(2);
+    if(result == nullptr) {
+        Py_DECREF(pyKey);
+        Py_DECREF(pyValue);
+    }
+    PyTuple_SET_ITEM(result, 0, pyKey);
+    PyTuple_SET_ITEM(result, 1, pyValue);
+    return result;
+}
+
+
 static PyMethodDef OOCLazyDict_methods[] = {
     {
         "eager",
@@ -250,4 +452,36 @@ PyTypeObject OOCLazyDictType = {
     .tp_methods = OOCLazyDict_methods,
     .tp_init = (initproc)OOCLazyDict_init,
     .tp_new = OOCLazyDict_new,
+};
+
+static PySequenceMethods OOCLazyDictItems_sequence_methods = {
+    .sq_length = OOCLazyDictItems_length
+};
+
+PyTypeObject OOCLazyDictItemsType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    .tp_name = "oocmap.LazyDictItems",
+    .tp_basicsize = sizeof(OOCLazyDictItemsObject),
+    .tp_itemsize = 0,
+    .tp_dealloc = (destructor)OOCLazyDictItems_dealloc,
+    .tp_as_sequence = &OOCLazyDictItems_sequence_methods,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = "An item view for LazyDict",
+    .tp_iter = OOCLazyDictItems_iter,
+    .tp_init = (initproc)OOCLazyDictItems_init,
+    .tp_new = OOCLazyDictItems_new,
+};
+
+PyTypeObject OOCLazyDictItemsIterType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    .tp_name = "oocmap.LazyDictItemsIter",
+    .tp_basicsize = sizeof(OOCLazyDictItemsIterObject),
+    .tp_itemsize = 0,
+    .tp_dealloc = (destructor)OOCLazyDictItemsIter_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = "An iterator for the item view for LazyDict",
+    .tp_iter = OOCLazyDictItemsIter_iter,
+    .tp_iternext = OOCLazyDictItemsIter_iternext,
+    .tp_init = (initproc)OOCLazyDictItemsIter_init,
+    .tp_new = OOCLazyDictItemsIter_new,
 };

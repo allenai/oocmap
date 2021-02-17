@@ -28,19 +28,32 @@ PyObject* OOCLazyDict_eager(PyObject* pySelf);
 
 
 //
-// OOCLazyDictIter
+// OOCLazyDictItems
 //
 
 typedef struct {
     PyObject_HEAD
-    OOCMapObject* ooc;
-    uint32_t dictId;
+    OOCLazyDictObject* dict;
+} OOCLazyDictItemsObject;
+
+extern PyTypeObject OOCLazyDictItemsType;
+
+OOCLazyDictItemsObject* OOCLazyDictItems_fastnew(OOCMapObject* ooc, uint32_t dictId);
+
+
+//
+// OOCLazyDictItemsIter
+//
+
+typedef struct {
+    PyObject_HEAD
+    OOCLazyDictObject* dict;
     MDB_cursor* cursor;
-} OOCLazyDictIterObject;
+} OOCLazyDictItemsIterObject;
 
-extern PyTypeObject OOCLazyDictIterType;
+extern PyTypeObject OOCLazyDictItemsIterType;
 
-OOCLazyDictIterObject* OOCLazyDictIter_fastnew(OOCMapObject* ooc, uint32_t dictId);
+OOCLazyDictItemsIterObject* OOCLazyDictItemsIter_fastnew(OOCMapObject* ooc, uint32_t dictId);
 
 
 #endif
