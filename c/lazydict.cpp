@@ -151,7 +151,7 @@ static void OOCLazyDictItems_dealloc(OOCLazyDictItemsObject* const self) {
 }
 
 static void OOCLazyDictItemsIter_dealloc(OOCLazyDictItemsIterObject* const self) {
-    Py_DECREF(self->dict);
+    Py_XDECREF(self->dict);
     if(self->cursor != nullptr) {
         MDB_txn* const txn = mdb_cursor_txn(self->cursor);
         mdb_cursor_close(self->cursor);
