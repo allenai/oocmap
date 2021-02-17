@@ -33,7 +33,7 @@ PyObject* OOCLazyList_eager(PyObject* pySelf);
 
 typedef struct {
     PyObject_HEAD
-    OOCMapObject* ooc;
+    OOCMapObject* ooc;  // TODO: just refer to the OOCLazyList instead
     uint32_t listId;
     MDB_cursor* cursor;
 } OOCLazyListIterObject;
