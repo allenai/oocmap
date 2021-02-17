@@ -284,7 +284,12 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             };
             MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
             MDB_val mdbValue;
-            cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
+            try {
+                cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
+            } catch(const MdbError& e) {
+                if(e.mdbErrorCode == MDB_NOTFOUND) throw OocError(OocError::IndexError);
+                throw;
+            }
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
             return OOCMap_decode(self->ooc, encodedResult, txn);
