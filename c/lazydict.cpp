@@ -381,7 +381,12 @@ static PyObject* OOCLazyDictItemsIter_iternext(PyObject* const pySelf) {
     try {
         MDB_val mdbKey;
         MDB_val mdbValue;
-        cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_NEXT);
+        try {
+            cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_NEXT);
+        } catch(const MdbError& e) {
+            if(e.mdbErrorCode == MDB_NOTFOUND) throw OocError(OocError::IndexError);
+            throw;
+        }
 
         switch(mdbKey.mv_size) {
         case sizeof(DictItemKey):
