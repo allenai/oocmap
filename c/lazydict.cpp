@@ -329,6 +329,15 @@ PyObject* OOCLazyDictObject_eager(OOCLazyDictObject* const self, MDB_txn* const 
     return result;
 }
 
+static PyObject* OOCLazyDict_items(PyObject* const pySelf) {
+    if(pySelf->ob_type != &OOCLazyDictType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyDictObject* const self = reinterpret_cast<OOCLazyDictObject*>(pySelf);
+    return reinterpret_cast<PyObject*>(OOCLazyDictItems_fastnew(self));
+}
+
 static PyObject* OOCLazyDictItems_iter(PyObject* const pySelf) {
     if(pySelf->ob_type != &OOCLazyDictItemsType) {
         PyErr_BadArgument();
@@ -434,6 +443,11 @@ static PyMethodDef OOCLazyDict_methods[] = {
         (PyCFunction)OOCLazyDict_eager,
         METH_NOARGS,
         PyDoc_STR("returns the original dict")
+    }, {
+        "items",
+        (PyCFunction)OOCLazyDict_items,
+        METH_NOARGS,
+        PyDoc_STR("returns a view over the items in the dictionary")
     },
     {nullptr}, // sentinel
 };
