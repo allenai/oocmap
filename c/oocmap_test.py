@@ -60,10 +60,20 @@ def test_oocmap_list():
         l = [1, 2.0, "three", m[999]]
         m[0] = l
         assert l == m[0]
-        assert m[0] == l # not the same thing
+        assert m[0] == l  # not the same thing
+
+        empty_l = []
+        m[1] = empty_l
+        assert empty_l == m[1]
+        assert m[1] == empty_l
 
         # LazyList.__len__()
         assert len(l) == len(m[0])
+        assert len(empty_l) == len(m[1])
+
+        # Iterators
+        assert l == list(iter(m[0]))
+        assert empty_l == list(iter(m[1]))
 
         # LazyList.index()
         for item in l + ["notfound"]:
