@@ -14,7 +14,7 @@ oocmap_module = Extension(
         'midl.c',
         'spooky.cpp'
     ],
-    extra_compile_args=["-O0", "-g"],    # DEBUG
+    #extra_compile_args=["-O0", "-g"],    # DEBUG
 )
 
 setup(name='oocmap',
