@@ -126,7 +126,7 @@ static Py_ssize_t OOCLazyList_length(PyObject* const pySelf) {
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, false);
-        Py_ssize_t const result = OOCLazyListObject_length(self, txn);
+        const Py_ssize_t result = OOCLazyListObject_length(self, txn);
         txn_commit(txn);
         return result;
     } catch(const OocError& error) {
