@@ -398,7 +398,9 @@ PyObject* OOCLazyList_richcompare(PyObject* const pySelf, PyObject* const other,
 
         while(true) {
             PyObject* const selfItem = PyIter_Next(selfIter);
+            if(PyErr_Occurred()) return nullptr;
             PyObject* const otherItem = PyIter_Next(otherIter);
+            if(PyErr_Occurred()) return nullptr;
 
             if(selfItem == nullptr && otherItem == nullptr) {
                 // Both iterators are at the end, and they compared the same all the way though.
