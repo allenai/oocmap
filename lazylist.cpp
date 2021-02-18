@@ -149,6 +149,13 @@ Py_ssize_t OOCLazyListObject_length(OOCLazyListObject* const self, MDB_txn* cons
 }
 
 static PyObject* OOCLazyList_item(PyObject* const pySelf, Py_ssize_t const index) {
+    if(index < 0) {
+        // Negative indices are already handled for us. If we get one now, it's an
+        // automatic IndexError.
+        PyErr_Format(PyExc_IndexError, "list index out of range");
+        return nullptr;
+    }
+
     if(pySelf->ob_type != &OOCLazyListType) {
         PyErr_BadArgument();
         return nullptr;
