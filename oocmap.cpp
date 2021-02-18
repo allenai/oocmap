@@ -56,6 +56,7 @@ void OOCMap_encode(
     }
 
     // TODO: Do this in terms of "protocols", not concrete objects (https://docs.python.org/3/c-api/mapping.html and friends)
+    // TODO: maybe? Not sure that's an improvement.
 
     // Python's integers
     if(PyLong_CheckExact(value)) {
