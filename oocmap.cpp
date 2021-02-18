@@ -356,6 +356,7 @@ void OOCMap_encode(
         if(tupleValue->ooc == self) {
             dest->asUInt = tupleValue->tupleId;
             dest->typeCode = TYPE_CODE_TUPLE;
+            dest->lengthMinusOne = 0;
             destInTheMap = dest;
             return;
         } else {
@@ -382,6 +383,7 @@ void OOCMap_encode(
             dest->asListKey.listId = listValue->listId;
             dest->asListKey.listIndex = std::numeric_limits<uint32_t>::max();
             dest->typeCode = TYPE_CODE_LIST;
+            dest->lengthMinusOne = 0;
             destInTheMap = dest;
             return;
         } else {
@@ -408,6 +410,7 @@ void OOCMap_encode(
             dest->asDictKey.dictId = dictValue->dictId;
             dest->asDictKey.reserved = 0;
             dest->typeCode = TYPE_CODE_DICT;
+            dest->lengthMinusOne = 0;
             destInTheMap = dest;
             return;
         } else {
