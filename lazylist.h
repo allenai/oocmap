@@ -26,6 +26,13 @@ Py_ssize_t OOCLazyListObject_length(OOCLazyListObject* self, MDB_txn* txn);
 PyObject* OOCLazyListObject_eager(OOCLazyListObject* self, MDB_txn* txn);
 PyObject* OOCLazyList_eager(PyObject* pySelf);
 
+Py_ssize_t OOCLazyListObject_index(
+    OOCLazyListObject* self,
+    PyObject* value,
+    Py_ssize_t start,
+    Py_ssize_t stop,
+    MDB_txn* txn);
+
 
 //
 // OOCLazyListIter

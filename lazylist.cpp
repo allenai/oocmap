@@ -249,6 +249,152 @@ PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, MDB_txn* const 
     return result;
 }
 
+static PyObject* OOCLazyList_index(
+    PyObject* const pySelf,
+    PyObject *const *const args,
+    const Py_ssize_t nargs
+) {
+    if(pySelf->ob_type != &OOCLazyListType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
+
+    // parse parameters
+    if(nargs < 1) {
+        PyErr_Format(PyExc_TypeError, "index expected at least 1 argument, got 0");
+        return nullptr;
+    }
+    PyObject* const value = args[0];
+
+    Py_ssize_t start = 0;
+    if(nargs > 1) {
+        start = PyLong_AsSsize_t(args[1]);
+        if(PyErr_Occurred()) return nullptr;
+    }
+
+    Py_ssize_t stop = 9223372036854775807;
+    if(nargs > 2) {
+        stop = PyLong_AsSsize_t(args[2]);
+        if(PyErr_Occurred()) return nullptr;
+    }
+
+    Py_ssize_t index;
+    MDB_txn* txn = nullptr;
+    try {
+        txn = txn_begin(self->ooc->mdb, false);
+        index = OOCLazyListObject_index(self, value, start, stop, txn);
+        txn_commit(txn);
+    } catch(const OocError& error) {
+        if(txn != nullptr)
+            txn_abort(txn);
+        error.pythonize();
+        return nullptr;
+    }
+
+    if(index < 0) {
+        PyErr_Format(PyExc_ValueError, "%R is not in list", value);
+        return nullptr;
+    } else {
+        return PyLong_FromSsize_t(index);
+    }
+}
+
+Py_ssize_t OOCLazyListObject_index(
+    OOCLazyListObject* const self,
+    PyObject* const value,
+    Py_ssize_t start,
+    Py_ssize_t stop,
+    MDB_txn* const txn
+) {
+    // unfuck start and stop
+    // That behavior in Python is seriously weird and we have to copy it here.
+    Py_ssize_t length = -1;
+    if(start < 0) {
+        length = OOCLazyListObject_length(self, txn);
+        start += length;
+        if(start < 0)
+            start = 0;
+    }
+    if(stop < 0) {
+        if(length < 0)
+            length = OOCLazyListObject_length(self, txn);
+        stop += length;
+    }
+
+    Id2EncodedMap insertedItemsInThisTransaction;
+    EncodedValue encodedValue;
+    try {
+        OOCMap_encode(self->ooc, value, &encodedValue, txn, insertedItemsInThisTransaction, true);
+    } catch(const MdbError& e) {
+        if(e.mdbErrorCode != EACCES) throw;
+        // We tried to write the value in a readonly transaction, so we got the EACCES error. This must
+        // mean the value is a mutable value. The only thing we can do is search linearly through the list.
+        encodedValue.typeCodeWithLength = 0xff;  // Mark the encoded value as unusable
+    } catch(const OocError& e) {
+        if(e.errorCode != OocError::ImmutableValueNotFound) throw;
+        // Needle is immutable but not inserted into the map, so we know for sure we won't find it.
+        return -1;
+    }
+
+    // We have an encoded value that's guaranteed to be an immutable value, so we can just search the
+    // encoded values directly with no need to decode.
+
+    ListKey encodedListKey = {
+        .listIndex = start,
+        .listId = self->listId,
+    };
+    static const uint32_t SEARCH_FAILED = std::numeric_limits<uint32_t>::max();
+    MDB_cursor* const cursor = cursor_open(txn, self->ooc->listsDb);
+    try {
+        MDB_val mdbKey = {.mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey};
+        MDB_val mdbValue;
+        try {
+            cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
+        } catch(const MdbError& e) {
+            if(e.mdbErrorCode == MDB_NOTFOUND)
+                encodedListKey.listIndex = SEARCH_FAILED;
+            else
+                throw;
+        }
+
+        while(encodedListKey.listIndex < stop && encodedListKey.listIndex != SEARCH_FAILED) {
+            if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
+            EncodedValue* const encodedItem = static_cast<EncodedValue* const>(mdbValue.mv_data);
+            if(encodedValue.typeCodeWithLength == 0xff) {
+                PyObject* const item = OOCMap_decode(self->ooc, encodedItem, txn);
+                if(PyObject_RichCompareBool(value, item, Py_EQ))
+                    break;
+            } else {
+                if(encodedValue == *encodedItem)
+                    break;
+            }
+
+            try {
+                cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
+            } catch(const MdbError& e) {
+                encodedListKey.listIndex = SEARCH_FAILED;
+                break;
+            }
+            if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
+            ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
+            if(listKey->listId != self->listId)
+                encodedListKey.listIndex = SEARCH_FAILED;
+            else
+                encodedListKey.listIndex = listKey->listIndex;
+        }
+
+        cursor_close(cursor);
+    } catch(...) {
+        cursor_close(cursor);
+        throw;
+    }
+
+    if(encodedListKey.listIndex >= stop || encodedListKey.listIndex == SEARCH_FAILED)
+        return -1;
+    else
+        return encodedListKey.listIndex;
+}
 
 static PyObject* OOCLazyList_iter(PyObject* const pySelf) {
     if(pySelf->ob_type != &OOCLazyListType) {
@@ -450,6 +596,11 @@ static PyMethodDef OOCLazyList_methods[] = {
         (PyCFunction)OOCLazyList_eager,
         METH_NOARGS,
         PyDoc_STR("returns the original list")
+    }, {
+        "index",
+        (PyCFunction)OOCLazyList_index,
+        METH_FASTCALL,
+        PyDoc_STR("returns the index of the given item in the list")
     },
     {nullptr}, // sentinel
 };
