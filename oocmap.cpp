@@ -771,18 +771,6 @@ static PyObject* OOCMap_get(PyObject* pySelf, PyObject* key) {
 //
 
 static PyMethodDef OOCMap_methods[] = {
-// We're not using these anymore, but I'm leaving the code here as an example.
-//        {
-//            "begin_transaction",
-//            (PyCFunction)OOCMap_begin_transaction,
-//            METH_NOARGS,
-//            PyDoc_STR("start a transaction")
-//        },{
-//            "end_transaction",
-//            (PyCFunction)OOCMap_end_transaction,
-//            METH_NOARGS,
-//            PyDoc_STR("end a transaction")
-//        },
         {nullptr}, // sentinel
 };
 
