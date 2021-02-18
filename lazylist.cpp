@@ -196,7 +196,9 @@ PyObject* OOCLazyList_eager(PyObject* const pySelf) {
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, false);
-        return OOCLazyListObject_eager(self, txn);
+        PyObject* const result = OOCLazyListObject_eager(self, txn);
+        txn_commit(txn);
+        return result;
     } catch(const OocError& error) {
         if(txn != nullptr)
             txn_abort(txn);
