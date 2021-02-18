@@ -1,3 +1,1 @@
-lmdb
-mmh3
 pytest
