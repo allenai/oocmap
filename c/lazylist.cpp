@@ -19,13 +19,12 @@ OOCLazyListObject* OOCLazyList_fastnew(OOCMapObject* const ooc, const uint32_t l
     return self;
 }
 
-OOCLazyListIterObject* OOCLazyListIter_fastnew(OOCMapObject* const ooc, const uint32_t listId) {
+OOCLazyListIterObject* OOCLazyListIter_fastnew(OOCLazyListObject* const list) {
     PyObject* const pySelf = OOCLazyListIterType.tp_alloc(&OOCLazyListIterType, 0);
     if(pySelf == nullptr) throw OocError(OocError::OutOfMemory);
     OOCLazyListIterObject* self = reinterpret_cast<OOCLazyListIterObject*>(pySelf);
-    self->ooc = ooc;
-    Py_INCREF(ooc);
-    self->listId = listId;
+    self->list = list;
+    Py_INCREF(list);
     self->cursor = nullptr;
     return self;
 }
@@ -54,8 +53,7 @@ static PyObject* OOCLazyListIter_new(PyTypeObject* const type, PyObject* const a
         PyErr_NoMemory();
         return nullptr;
     }
-    self->ooc = nullptr;
-    self->listId = 0;
+    self->list = nullptr;
     self->cursor = nullptr;
     return (PyObject*)self;
 }
@@ -82,20 +80,20 @@ static int OOCLazyList_init(OOCLazyListObject* const self, PyObject* const args,
 
 static int OOCLazyListIter_init(OOCLazyListIterObject* const self, PyObject* const args, PyObject* const kwds) {
     // parse parameters
-    static const char *kwlist[] = {"oocmap", "list_id", nullptr};
-    PyObject* oocmapObject = nullptr;
+    static const char *kwlist[] = {"list", "list_id", nullptr};
+    PyObject* listObject = nullptr;
     const int parseSuccess = PyArg_ParseTupleAndKeywords(
         args,
         kwds,
-        "O!K",
+        "O!",
         const_cast<char**>(kwlist),
-        &OOCMapType, &oocmapObject, &self->listId);
+        &OOCLazyListType, &listObject);
     if(!parseSuccess)
         return -1;
 
     // TODO: consider that __init__ might be called on an already initialized object
-    self->ooc = reinterpret_cast<OOCMapObject*>(oocmapObject);
-    Py_INCREF(oocmapObject);
+    self->list = reinterpret_cast<OOCLazyListObject*>(listObject);
+    Py_INCREF(listObject);
     self->cursor = nullptr;
 
     return 0;
@@ -107,7 +105,7 @@ static void OOCLazyList_dealloc(OOCLazyListObject* const self) {
 }
 
 static void OOCLazyListIter_dealloc(OOCLazyListIterObject* const self) {
-    Py_XDECREF(self->ooc);
+    Py_XDECREF(self->list);
     if(self->cursor != nullptr) {
         MDB_txn* const txn = mdb_cursor_txn(self->cursor);
         mdb_cursor_close(self->cursor);
@@ -256,7 +254,7 @@ static PyObject* OOCLazyList_iter(PyObject* const pySelf) {
         return nullptr;
     }
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
-    return reinterpret_cast<PyObject*>(OOCLazyListIter_fastnew(self->ooc, self->listId));
+    return reinterpret_cast<PyObject*>(OOCLazyListIter_fastnew(self));
 }
 
 static PyObject* OOCLazyListIter_iter(PyObject* const pySelf) {
@@ -270,17 +268,18 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
         return nullptr;
     }
     OOCLazyListIterObject* const self = reinterpret_cast<OOCLazyListIterObject*>(pySelf);
-    if(self->ooc == nullptr) return nullptr;
+    if(self->list == nullptr) return nullptr;
+    OOCMapObject* const ooc = self->list->ooc;
 
     if(self->cursor == nullptr) {
         MDB_txn* txn = nullptr;
         try {
-            txn = txn_begin(self->ooc->mdb, false);
-            self->cursor = cursor_open(txn, self->ooc->listsDb);
+            txn = txn_begin(ooc->mdb, false);
+            self->cursor = cursor_open(txn, ooc->listsDb);
 
             ListKey encodedListKey = {
                 .listIndex = 0,
-                .listId = self->listId
+                .listId = self->list->listId
             };
             MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
             MDB_val mdbValue;
@@ -292,7 +291,7 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             }
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
-            return OOCMap_decode(self->ooc, encodedResult, txn);
+            return OOCMap_decode(ooc, encodedResult, txn);
         } catch(const OocError& error) {
             if(self->cursor != nullptr) {
                 cursor_close(self->cursor);
@@ -300,7 +299,7 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             }
             if(error.errorCode == OocError::IndexError) {
                 txn_commit(txn);
-                Py_CLEAR(self->ooc);
+                Py_CLEAR(self->list);
             } else {
                 if(txn != nullptr)
                     txn_abort(txn);
@@ -318,19 +317,19 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
             if(
                 listKey->listIndex == std::numeric_limits<uint32_t>::max() ||
-                listKey->listId != self->listId
+                listKey->listId != self->list->listId
             ) {
                 throw OocError(OocError::IndexError);
             }
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
-            return OOCMap_decode(self->ooc, encodedResult, txn);
+            return OOCMap_decode(ooc, encodedResult, txn);
         } catch(const OocError& error) {
             cursor_close(self->cursor);
             self->cursor = nullptr;
             if(error.errorCode == OocError::IndexError) {
                 txn_commit(txn);
-                Py_CLEAR(self->ooc);
+                Py_CLEAR(self->list);
             } else {
                 txn_abort(txn);
                 error.pythonize();
