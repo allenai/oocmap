@@ -344,9 +344,6 @@ Py_ssize_t OOCLazyListObject_index(
         return -1;
     }
 
-    // We have an encoded value that's guaranteed to be an immutable value, so we can just search the
-    // encoded values directly with no need to decode.
-
     ListKey encodedListKey = {
         .listIndex = start,
         .listId = self->listId,
