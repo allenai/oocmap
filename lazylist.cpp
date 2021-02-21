@@ -377,8 +377,12 @@ Py_ssize_t OOCLazyListObject_index(
             try {
                 cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
             } catch(const MdbError& e) {
-                encodedListKey.listIndex = SEARCH_FAILED;
-                break;
+                if(e.mdbErrorCode == MDB_NOTFOUND) {
+                    encodedListKey.listIndex = SEARCH_FAILED;
+                    break;
+                } else {
+                    throw;
+                }
             }
             if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
             ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
