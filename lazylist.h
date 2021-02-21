@@ -32,7 +32,10 @@ Py_ssize_t OOCLazyListObject_index(
     Py_ssize_t start,
     Py_ssize_t stop,
     MDB_txn* txn);
-
+Py_ssize_t OOCLazyListObject_count(
+    OOCLazyListObject* self,
+    PyObject* value,
+    MDB_txn* txn);
 
 //
 // OOCLazyListIter
