@@ -17,7 +17,7 @@ void put(
     unsigned int flags = 0
 );
 
-void get(
+bool get(
     MDB_txn* txn,
     MDB_dbi dbi,
     MDB_val* key,

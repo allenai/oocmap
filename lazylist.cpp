@@ -143,7 +143,8 @@ Py_ssize_t OOCLazyListObject_length(OOCLazyListObject* const self, MDB_txn* cons
 
     MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
     MDB_val mdbValue;
-    get(txn, self->ooc->listsDb, &mdbKey, &mdbValue);
+    const bool found = get(txn, self->ooc->listsDb, &mdbKey, &mdbValue);
+    if(!found) throw OocError(OocError::UnexpectedData);
     if(mdbValue.mv_size != sizeof(Py_ssize_t)) throw OocError(OocError::UnexpectedData);
     return *reinterpret_cast<Py_ssize_t*>(mdbValue.mv_data);
 }
@@ -172,14 +173,8 @@ static PyObject* OOCLazyList_item(PyObject* const pySelf, Py_ssize_t const index
         txn = txn_begin(self->ooc->mdb, false);
         MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
         MDB_val mdbValue;
-        try {
-            get(txn, self->ooc->listsDb, &mdbKey, &mdbValue);
-        } catch(const MdbError& error) {
-            if(error.mdbErrorCode == MDB_NOTFOUND)
-                throw OocError(OocError::IndexError);
-            else
-                throw;
-        }
+        const bool found = get(txn, self->ooc->listsDb, &mdbKey, &mdbValue);
+        if(!found) throw OocError(OocError::IndexError);
         if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
         EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
         PyObject* const result = OOCMap_decode(self->ooc, encodedResult, txn);

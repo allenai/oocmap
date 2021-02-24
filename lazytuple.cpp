@@ -28,7 +28,8 @@ PyObject* OOCLazyTupleObject_eager(OOCLazyTupleObject* const self, MDB_txn* cons
 
     MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };
     MDB_val mdbValue;
-    get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+    const bool found = get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+    if(!found) throw OocError(OocError::UnexpectedData);
     const Py_ssize_t size = mdbValue.mv_size / sizeof(EncodedValue);
     PyObject* const result = PyTuple_New(size);
     if(result == nullptr) throw OocError(OocError::OutOfMemory);
@@ -101,7 +102,8 @@ static Py_ssize_t OOCLazyTuple_length(PyObject* const pySelf) {
         txn = txn_begin(self->ooc->mdb, false);
         MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };
         MDB_val mdbValue;
-        get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+        const bool found = get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+        if(!found) throw OocError(OocError::UnexpectedData);
         Py_ssize_t result = mdbValue.mv_size / sizeof(EncodedValue);
         txn_commit(txn);
         return result;
@@ -128,7 +130,8 @@ static PyObject* OOCLazyTuple_item(PyObject* const pySelf, Py_ssize_t const inde
         txn = txn_begin(self->ooc->mdb, false);
         MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };
         MDB_val mdbValue;
-        get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+        const bool found = get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+        if(!found) throw OocError(OocError::UnexpectedData);
         if(index < 0 || index > static_cast<Py_ssize_t>(mdbValue.mv_size / sizeof(EncodedValue)))
             throw OocError(OocError::IndexError);
         EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data) + index;

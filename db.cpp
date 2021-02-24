@@ -75,7 +75,7 @@ void put(
         throw MdbError(error);
 }
 
-void get(
+bool get(
     MDB_txn* const txn,
     const MDB_dbi dbi,
     MDB_val* const key,
@@ -83,8 +83,14 @@ void get(
 ) {
     GilUnlocker gil;
     const int error = mdb_get(txn, dbi, key, value);
-    if(error != 0)
+    switch(error) {
+    case MDB_SUCCESS:
+        return true;
+    case MDB_NOTFOUND:
+        return false;
+    default:
         throw MdbError(error);
+    }
 }
 
 uint64_t putImmutable(

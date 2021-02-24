@@ -484,7 +484,8 @@ PyObject* OOCMap_decode(
     case TYPE_CODE_LONG_NEGATIVE_INT: {
         MDB_val mdbKey = { .mv_size = sizeof(encodedValue->asUInt), .mv_data = &(encodedValue->asUInt) };
         MDB_val mdbValue;
-        get(txn, self->intsDb, &mdbKey, &mdbValue);
+        const bool found = get(txn, self->intsDb, &mdbKey, &mdbValue);
+        if(!found) throw OocError(OocError::UnexpectedData);
 
         PyLongObject* const result = _PyLong_New(mdbValue.mv_size / sizeof(digit));
         if(result == nullptr) throw OocError(OocError::OutOfMemory);
@@ -534,7 +535,8 @@ PyObject* OOCMap_decode(
     case TYPE_CODE_UNICODE_LONG_4BYTE: {
         MDB_val mdbKey = {.mv_size = sizeof(encodedValue->asUInt), .mv_data = &(encodedValue->asUInt)};
         MDB_val mdbValue;
-        get(txn, self->stringsDb, &mdbKey, &mdbValue);
+        const bool found = get(txn, self->stringsDb, &mdbKey, &mdbValue);
+        if(!found) throw OocError(OocError::UnexpectedData);
 
         Py_ssize_t size = mdbValue.mv_size;
         int kind;
@@ -743,21 +745,19 @@ static PyObject* OOCMap_get(PyObject* pySelf, PyObject* key) {
         MDB_val mdbKey = {.mv_size=sizeof(encodedKey), .mv_data=&encodedKey};
 
         MDB_val mdbValue;
-        get(txn, self->rootDb, &mdbKey, &mdbValue);
-        if(mdbValue.mv_size != sizeof(EncodedValue))
-            throw OocError(OocError::UnexpectedData);
-        EncodedValue* encodedValue = static_cast<EncodedValue*>(mdbValue.mv_data);
+        const bool found = get(txn, self->rootDb, &mdbKey, &mdbValue);
+        if(found) {
+            if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
+            EncodedValue* encodedValue = static_cast<EncodedValue*>(mdbValue.mv_data);
 
-        PyObject* const result = OOCMap_decode(self, encodedValue, txn);
-        txn_commit(txn);
-        return result;
-    } catch(const MdbError& error) {
-        if(txn != nullptr) txn_abort(txn);
-        if(error.mdbErrorCode == MDB_NOTFOUND)
+            PyObject* const result = OOCMap_decode(self, encodedValue, txn);
+            txn_commit(txn);
+            return result;
+        } else {
+            txn_abort(txn);
             PyErr_SetObject(PyExc_KeyError, key);
-        else
-            error.pythonize();
-        return nullptr;
+            return nullptr;
+        }
     } catch(const OocError& error) {
         if(txn != nullptr) txn_abort(txn);
         if(error.errorCode == OocError::ImmutableValueNotFound)

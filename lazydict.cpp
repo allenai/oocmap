@@ -184,7 +184,8 @@ static Py_ssize_t OOCLazyDict_length(PyObject* const pySelf) {
 Py_ssize_t OOCLazyDictObject_length(OOCLazyDictObject* const self, MDB_txn* const txn) {
     MDB_val mdbKey = { .mv_size = sizeof(self->dictId), .mv_data = &self->dictId };
     MDB_val mdbValue;
-    get(txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
+    const bool found = get(txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
+    if(!found) throw OocError(OocError::UnexpectedData);
     if(mdbValue.mv_size != sizeof(Py_ssize_t)) throw OocError(OocError::UnexpectedData);
     return *reinterpret_cast<Py_ssize_t*>(mdbValue.mv_data);
 }
@@ -247,14 +248,9 @@ static PyObject* OOCLazyDict_get(PyObject* const pySelf, PyObject* const key) {
 
         MDB_val mdbKey = { .mv_size = sizeof(encodedItemKey), .mv_data = &encodedItemKey };
         MDB_val mdbValue;
-        try {
-            get(txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
-        } catch(const MdbError& e) {
-            if(e.mdbErrorCode == MDB_NOTFOUND)
-                throw OocError(OocError::ImmutableValueNotFound);
-            else
-                throw;
-        }
+        const bool found = get(txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
+        if(!found)
+            throw OocError(OocError::ImmutableValueNotFound);
 
         if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
         EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
