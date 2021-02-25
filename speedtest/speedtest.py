@@ -19,9 +19,9 @@ import sys
 setname = sys.argv[1]
 
 if setname.startswith("big_"):
-  l = 50000
+  l = 10000
 elif setname.startswith("small_"):
-  l = 500000
+  l = 200000
 
 import timeit
 start = timeit.default_timer()
