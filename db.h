@@ -36,6 +36,6 @@ void del(MDB_txn* txn, MDB_dbi dbi, MDB_val* key);
 
 MDB_cursor* cursor_open(MDB_txn* txn, MDB_dbi dbi);
 void cursor_close(MDB_cursor* cursor);
-void cursor_get(MDB_cursor* cursor, MDB_val* key, MDB_val* data, MDB_cursor_op op);
+bool cursor_get(MDB_cursor* cursor, MDB_val* key, MDB_val* data, MDB_cursor_op op);
 
 #endif //OOCMAP_DB_H

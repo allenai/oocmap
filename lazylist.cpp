@@ -225,20 +225,22 @@ PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, MDB_txn* const 
         };
         MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
         MDB_val mdbValue;
-        cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
+        bool found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
 
-        while(true) {
+        while(found) {
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
             PyObject* const item = OOCMap_decode(self->ooc, encodedResult, txn);
             PyList_SET_ITEM(result, encodedListKey.listIndex, item);
 
-            cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
-            if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
-            ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
-            if(listKey->listIndex == std::numeric_limits<uint32_t>::max()) break;
-            if(listKey->listId != self->listId) break;
-            encodedListKey.listIndex = listKey->listIndex;
+            found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
+            if(found) {
+                if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
+                ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
+                if(listKey->listIndex == std::numeric_limits<uint32_t>::max()) break;
+                if(listKey->listId != self->listId) break;
+                encodedListKey.listIndex = listKey->listIndex;
+            }
         }
 
         cursor_close(cursor);
@@ -343,21 +345,24 @@ Py_ssize_t OOCLazyListObject_index(
         .listIndex = start,
         .listId = self->listId,
     };
-    static const uint32_t SEARCH_FAILED = std::numeric_limits<uint32_t>::max();
+    MDB_val mdbKey = {.mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey};
+    MDB_val mdbValue;
     MDB_cursor* const cursor = cursor_open(txn, self->ooc->listsDb);
+    bool found;
     try {
-        MDB_val mdbKey = {.mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey};
-        MDB_val mdbValue;
-        try {
-            cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
-        } catch(const MdbError& e) {
-            if(e.mdbErrorCode == MDB_NOTFOUND)
-                encodedListKey.listIndex = SEARCH_FAILED;
-            else
-                throw;
-        }
+        found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_RANGE);
+        while(found) {
+            if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
+            ListKey* const listItemKey = static_cast<ListKey*>(mdbKey.mv_data);
+            if(
+                listItemKey->listIndex >= stop ||
+                listItemKey->listId != self->listId ||
+                listItemKey->listIndex == std::numeric_limits<uint32_t>::max()
+            ) {
+                found = false;
+                break;
+            }
 
-        while(encodedListKey.listIndex < stop && encodedListKey.listIndex != SEARCH_FAILED) {
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedItem = static_cast<EncodedValue* const>(mdbValue.mv_data);
             if(encodedValue.typeCodeWithLength == 0xff) {
@@ -369,22 +374,7 @@ Py_ssize_t OOCLazyListObject_index(
                     break;
             }
 
-            try {
-                cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
-            } catch(const MdbError& e) {
-                if(e.mdbErrorCode == MDB_NOTFOUND) {
-                    encodedListKey.listIndex = SEARCH_FAILED;
-                    break;
-                } else {
-                    throw;
-                }
-            }
-            if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
-            ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
-            if(listKey->listId != self->listId)
-                encodedListKey.listIndex = SEARCH_FAILED;
-            else
-                encodedListKey.listIndex = listKey->listIndex;
+            found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
         }
 
         cursor_close(cursor);
@@ -393,10 +383,11 @@ Py_ssize_t OOCLazyListObject_index(
         throw;
     }
 
-    if(encodedListKey.listIndex >= stop || encodedListKey.listIndex == SEARCH_FAILED)
+    if(!found)
         return -1;
-    else
-        return encodedListKey.listIndex;
+
+    ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
+    return listKey->listIndex;
 }
 
 static PyObject* OOCLazyList_count(
@@ -454,15 +445,16 @@ Py_ssize_t OOCLazyListObject_count(
     try {
         MDB_val mdbKey = {.mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey};
         MDB_val mdbValue;
-        cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_RANGE);
+        bool found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_RANGE);
 
-        while(true) {
+        while(found) {
             if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
             ListKey* const listItemKey = static_cast<ListKey*>(mdbKey.mv_data);
             if(
                 listItemKey->listId != self->listId ||
                 listItemKey->listIndex == std::numeric_limits<uint32_t>::max()
             ) {
+                found = false;
                 break;
             }
 
@@ -477,16 +469,10 @@ Py_ssize_t OOCLazyListObject_count(
                     count += 1;
             }
 
-            cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
+            found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
         }
 
         cursor_close(cursor);
-    } catch(const MdbError& e) {
-        cursor_close(cursor);
-        if(e.mdbErrorCode == MDB_NOTFOUND)
-            return count;
-        else
-            throw;
     } catch(...) {
         cursor_close(cursor);
         throw;
@@ -580,8 +566,8 @@ void OOCLazyListObject_extend(
         MDB_cursor* const cursor = cursor_open(txn, other->ooc->listsDb);
         try {
             MDB_val mdbValue;
-            cursor_get(cursor, &mdbOtherKey, &mdbValue, MDB_SET_RANGE);
-            while(true) {
+            bool found = cursor_get(cursor, &mdbOtherKey, &mdbValue, MDB_SET_RANGE);
+            while(found) {
                 if(mdbOtherKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
                 ListKey* const listItemKey = static_cast<ListKey*>(mdbOtherKey.mv_data);
                 if(
@@ -595,7 +581,7 @@ void OOCLazyListObject_extend(
                 put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbValue);
                 selfEncodedListKey.listIndex += 1;
 
-                cursor_get(cursor, &mdbOtherKey, &mdbValue, MDB_NEXT);
+                found = cursor_get(cursor, &mdbOtherKey, &mdbValue, MDB_NEXT);
             }
 
             cursor_close(cursor);
@@ -653,28 +639,26 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             };
             MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
             MDB_val mdbValue;
-            try {
-                cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
-            } catch(const MdbError& e) {
-                if(e.mdbErrorCode == MDB_NOTFOUND) throw OocError(OocError::IndexError);
-                throw;
+            const bool found = cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
+            if(!found) {
+                cursor_close(self->cursor);
+                self->cursor = nullptr;
+                txn_commit(txn);
+                Py_CLEAR(self->list);
+                return nullptr;
+            } else {
+                if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
+                EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
+                return OOCMap_decode(ooc, encodedResult, txn);
             }
-            if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
-            EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
-            return OOCMap_decode(ooc, encodedResult, txn);
         } catch(const OocError& error) {
             if(self->cursor != nullptr) {
                 cursor_close(self->cursor);
                 self->cursor = nullptr;
             }
-            if(error.errorCode == OocError::IndexError) {
-                txn_commit(txn);
-                Py_CLEAR(self->list);
-            } else {
-                if(txn != nullptr)
-                    txn_abort(txn);
-                error.pythonize();
-            }
+            if(txn != nullptr)
+                txn_abort(txn);
+            error.pythonize();
             return nullptr;
         }
     } else {
@@ -682,14 +666,25 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
         try {
             MDB_val mdbKey;
             MDB_val mdbValue;
-            cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_NEXT);
+            const bool found = cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_NEXT);
+            if(!found) {
+                cursor_close(self->cursor);
+                self->cursor = nullptr;
+                txn_commit(txn);
+                Py_CLEAR(self->list);
+                return nullptr;
+            }
             if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
             ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
             if(
                 listKey->listIndex == std::numeric_limits<uint32_t>::max() ||
                 listKey->listId != self->list->listId
             ) {
-                throw OocError(OocError::IndexError);
+                cursor_close(self->cursor);
+                self->cursor = nullptr;
+                txn_commit(txn);
+                Py_CLEAR(self->list);
+                return nullptr;
             }
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
@@ -697,13 +692,8 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
         } catch(const OocError& error) {
             cursor_close(self->cursor);
             self->cursor = nullptr;
-            if(error.errorCode == OocError::IndexError) {
-                txn_commit(txn);
-                Py_CLEAR(self->list);
-            } else {
-                txn_abort(txn);
-                error.pythonize();
-            }
+            txn_abort(txn);
+            error.pythonize();
             return nullptr;
         }
     }

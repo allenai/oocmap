@@ -297,10 +297,13 @@ PyObject* OOCLazyDictObject_eager(OOCLazyDictObject* const self, MDB_txn* const 
 
         MDB_val mdbKey = { .mv_size = sizeof(self->dictId), .mv_data = &self->dictId };
         MDB_val mdbValue;
-        cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET);
+        bool found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET);
+        if(!found) throw OocError(OocError::UnexpectedData);
 
         while(true) {
-            cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
+            found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
+            if(!found)
+                break;
             if(mdbKey.mv_size != sizeof(DictItemKey)) throw OocError(OocError::UnexpectedData);
             DictItemKey* const encodedItemKey = static_cast<DictItemKey* const>(mdbKey.mv_data);
             if(encodedItemKey->dictId != self->dictId)
@@ -365,7 +368,8 @@ static PyObject* OOCLazyDictItemsIter_iternext(PyObject* const pySelf) {
 
             MDB_val mdbKey = { .mv_size = sizeof(self->dict->dictId), .mv_data = &self->dict->dictId };
             MDB_val mdbValue;
-            cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_SET);
+            const bool found = cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_SET);
+            if(!found) throw OocError(OocError::UnexpectedData);
         } catch(const OocError& error) {
             if(self->cursor != nullptr) {
                 cursor_close(self->cursor);
@@ -386,12 +390,8 @@ static PyObject* OOCLazyDictItemsIter_iternext(PyObject* const pySelf) {
     try {
         MDB_val mdbKey;
         MDB_val mdbValue;
-        try {
-            cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_NEXT);
-        } catch(const MdbError& e) {
-            if(e.mdbErrorCode == MDB_NOTFOUND) throw OocError(OocError::IndexError);
-            throw;
-        }
+        const bool found = cursor_get(self->cursor, &mdbKey, &mdbValue, MDB_NEXT);
+        if(!found) throw OocError(OocError::IndexError);
 
         switch(mdbKey.mv_size) {
         case sizeof(DictItemKey):

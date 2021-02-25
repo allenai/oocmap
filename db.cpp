@@ -147,7 +147,7 @@ void cursor_close(MDB_cursor* const cursor) {
     // Apparently this never fails?
 }
 
-void cursor_get(
+bool cursor_get(
     MDB_cursor* const cursor,
     MDB_val* const key,
     MDB_val* const data,
@@ -155,6 +155,12 @@ void cursor_get(
 ) {
     GilUnlocker gil;
     const int error = mdb_cursor_get(cursor, key, data, op);
-    if(error != 0)
+    switch(error) {
+    case MDB_SUCCESS:
+        return true;
+    case MDB_NOTFOUND:
+        return false;
+    default:
         throw MdbError(error);
+    }
 }
