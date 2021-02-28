@@ -117,6 +117,14 @@ def test_oocmap_list():
         m[0].append(4)
         assert m[0].eager() == [1, 2.0, "three", m[999], 4]
 
+        # LazyList.extend()
+        m[1].extend(empty_l)
+        assert m[1].eager() == []
+        m[1].extend(l)
+        assert m[1].eager() == [1, 2.0, "three", m[999]]
+        m[1].extend(m[0])
+        assert m[1].eager() == [1, 2.0, "three", m[999], 1, 2.0, "three", m[999], 4]
+
         # LazyList.__del__()
         del m[0][-1]  # make the two lists the same again after append
         for index in [-10, 10, -2, 1]:

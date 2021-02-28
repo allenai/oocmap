@@ -576,7 +576,7 @@ void OOCLazyListObject_extend(
                 if(mdbOtherKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
                 ListKey* const listItemKey = static_cast<ListKey*>(mdbOtherKey.mv_data);
                 if(
-                    listItemKey->listId != self->listId ||
+                    listItemKey->listId != other->listId ||
                     listItemKey->listIndex == ListKey::listIndexLength
                 ) {
                     break;
