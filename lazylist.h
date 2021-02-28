@@ -29,9 +29,9 @@ PyObject* OOCLazyList_eager(PyObject* pySelf);
 Py_ssize_t OOCLazyListObject_index(
     OOCLazyListObject* self,
     PyObject* value,
-    Py_ssize_t start,
-    Py_ssize_t stop,
-    MDB_txn* txn);
+    MDB_txn* txn,
+    Py_ssize_t start = 0,
+    Py_ssize_t stop = 9223372036854775807);
 
 Py_ssize_t OOCLazyListObject_count(OOCLazyListObject* self, PyObject* value, MDB_txn* txn);
 void OOCLazyListObject_extend(OOCLazyListObject* self, PyObject* other, MDB_txn* txn);

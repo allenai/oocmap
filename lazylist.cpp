@@ -387,7 +387,7 @@ static PyObject* OOCLazyList_index(
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, false);
-        index = OOCLazyListObject_index(self, value, start, stop, txn);
+        index = OOCLazyListObject_index(self, value, txn, start, stop);
         txn_commit(txn);
     } catch(const OocError& error) {
         if(txn != nullptr)
@@ -407,9 +407,9 @@ static PyObject* OOCLazyList_index(
 Py_ssize_t OOCLazyListObject_index(
     OOCLazyListObject* const self,
     PyObject* const value,
+    MDB_txn* const txn,
     Py_ssize_t start,
-    Py_ssize_t stop,
-    MDB_txn* const txn
+    Py_ssize_t stop
 ) {
     // unfuck start and stop
     // That behavior in Python is seriously weird and we have to copy it here.
@@ -827,7 +827,6 @@ void OOCLazyListObject_inplaceRepeat(
     put(txn, self->ooc->listsDb, &mdbDestKey, &mdbLength);
 }
 
-
 static PyObject* OOCLazyList_append(
     PyObject* const pySelf,
     PyObject* const other
@@ -935,6 +934,27 @@ void OOCLazyListObject_clear(OOCLazyListObject* const self, MDB_txn* const txn) 
     } catch(...) {
         if(cursor != nullptr) cursor_close(cursor);
         throw;
+    }
+}
+
+static int OOCLazyList_contains(PyObject* const pySelf, PyObject* const item) {
+    if(pySelf->ob_type != &OOCLazyListType) {
+        PyErr_BadArgument();
+        return -1;
+    }
+    OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
+
+    MDB_txn* txn = nullptr;
+    try {
+        txn = txn_begin(self->ooc->mdb, false);
+        const Py_ssize_t index = OOCLazyListObject_index(self, item, txn);
+        txn_commit(txn);
+        if(index < 0) return 0; else return 1;
+    } catch(const OocError& error) {
+        if(txn != nullptr)
+            txn_abort(txn);
+        error.pythonize();
+        return -1;
     }
 }
 
@@ -1178,7 +1198,7 @@ static PySequenceMethods OOCLazyList_sequence_methods = {
     .sq_repeat = nullptr, // TODO OOCLazyList_repeat,
     .sq_item = OOCLazyList_item,
     .sq_ass_item = OOCLazyList_setItem,
-    .sq_contains = nullptr, // TODO OOCLazyList_contains
+    .sq_contains = OOCLazyList_contains,
     .sq_inplace_concat = OOCLazyList_inplaceConcat,
     .sq_inplace_repeat = OOCLazyList_inplaceRepeat
 };

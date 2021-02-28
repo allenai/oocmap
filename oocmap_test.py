@@ -95,6 +95,13 @@ def test_oocmap_list():
                         lambda: l.index(item, start_index, end_index),
                         lambda: m[0].index(item, start_index, end_index))
 
+        # LazyList.__contains__()
+        for item in l + ["notfound"]:
+            # no indices
+            assert_equal_including_exceptions(
+                lambda: item in l,
+                lambda: item in m[0])
+
         # LazyList.__getitem__()
         for index in range(-10, 10):
             assert_equal_including_exceptions(
@@ -154,7 +161,6 @@ def test_oocmap_list():
         assert m[0].eager() == []
         m[0] = l    # reset
         assert m[0].eager() == l
-
 
         # LazyList.__setitem__()
         for index in range(-5, 5):
