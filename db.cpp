@@ -164,3 +164,22 @@ bool cursor_get(
         throw MdbError(error);
     }
 }
+
+void cursor_put(
+    MDB_cursor* const cursor,
+    MDB_val* const key,
+    MDB_val* const data,
+    const unsigned int flags
+) {
+    GilUnlocker gil;
+    const int error = mdb_cursor_put(cursor, key, data, flags);
+    if(error != MDB_SUCCESS)
+        throw MdbError(error);
+}
+
+void cursor_del(MDB_cursor* const cursor, const unsigned int flags) {
+    GilUnlocker gil;
+    const int error = mdb_cursor_del(cursor, flags);
+    if(error != MDB_SUCCESS)
+        throw MdbError(error);
+}
