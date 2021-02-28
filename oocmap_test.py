@@ -127,6 +127,8 @@ def test_oocmap_list():
 
         # LazyList.__del__()
         del m[0][-1]  # make the two lists the same again after append
+        assert m[0].eager() == l
+        assert l == m[0].eager()
         for index in [-10, 10, -2, 1]:
             def delete_l():
                 del l[index]
