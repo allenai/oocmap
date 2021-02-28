@@ -387,7 +387,7 @@ static PyObject* OOCLazyList_index(
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, false);
-        index = OOCLazyListObject_index(self, value, txn, start, stop);
+        index = OOCLazyListObject_index(self, txn, value, start, stop);
         txn_commit(txn);
     } catch(const OocError& error) {
         if(txn != nullptr)
@@ -405,9 +405,9 @@ static PyObject* OOCLazyList_index(
 }
 
 Py_ssize_t OOCLazyListObject_index(
-    OOCLazyListObject* const self,
-    PyObject* const value,
-    MDB_txn* const txn,
+    OOCLazyListObject* self,
+    MDB_txn* txn,
+    PyObject* value,
     Py_ssize_t start,
     Py_ssize_t stop
 ) {
@@ -504,7 +504,7 @@ static PyObject* OOCLazyList_count(
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, false);
-        count = OOCLazyListObject_count(self, value, txn);
+        count = OOCLazyListObject_count(self, txn, value);
         txn_commit(txn);
     } catch(const OocError& error) {
         if(txn != nullptr)
@@ -516,11 +516,7 @@ static PyObject* OOCLazyList_count(
     return PyLong_FromSsize_t(count);
 }
 
-Py_ssize_t OOCLazyListObject_count(
-    OOCLazyListObject* const self,
-    PyObject* const value,
-    MDB_txn* const txn
-) {
+Py_ssize_t OOCLazyListObject_count(OOCLazyListObject* self, MDB_txn* txn, PyObject* value) {
     Id2EncodedMap insertedItemsInThisTransaction;
     EncodedValue encodedValue;
     try {
@@ -594,7 +590,7 @@ static PyObject* OOCLazyList_extend(
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, true);
-        OOCLazyListObject_extend(self, other, txn);
+        OOCLazyListObject_extend(self, txn, other);
         txn_commit(txn);
     } catch(const OocError& error) {
         if(txn != nullptr)
@@ -606,14 +602,10 @@ static PyObject* OOCLazyList_extend(
     Py_RETURN_NONE;
 }
 
-void OOCLazyListObject_extend(
-    OOCLazyListObject* const self,
-    PyObject* const pyOther,
-    MDB_txn* const txn
-) {
+void OOCLazyListObject_extend(OOCLazyListObject* self, MDB_txn* txn, PyObject* pyOther) {
     if(pyOther->ob_type == &OOCLazyListType) {
         OOCLazyListObject* const other = reinterpret_cast<OOCLazyListObject*>(pyOther);
-        OOCLazyListObject_extend(self, other, txn);
+        OOCLazyListObject_extend(self, txn, other);
     } else {
         PyObject* item = nullptr;
         PyObject* const iter = PyObject_GetIter(pyOther);
@@ -648,14 +640,10 @@ void OOCLazyListObject_extend(
     }
 }
 
-void OOCLazyListObject_extend(
-    OOCLazyListObject* const self,
-    OOCLazyListObject* const other,
-    MDB_txn* const txn
-) {
+void OOCLazyListObject_extend(OOCLazyListObject* self, MDB_txn* txn, OOCLazyListObject* other) {
     if(other->ooc == self->ooc) {
         if(self->listId == other->listId) {
-            OOCLazyListObject_inplaceRepeat(self, 2, txn);
+            OOCLazyListObject_inplaceRepeat(self, txn, 2);
             return;
         }
 
@@ -707,7 +695,7 @@ void OOCLazyListObject_extend(
         put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
     } else {
         PyObject* const eager = OOCLazyList_eager(reinterpret_cast<PyObject* const>(other));
-        OOCLazyListObject_extend(self, eager, txn);
+        OOCLazyListObject_extend(self, txn, eager);
     }
 }
 
@@ -721,7 +709,7 @@ static PyObject* OOCLazyList_inplaceConcat(PyObject* const pySelf, PyObject* con
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, true);
-        OOCLazyListObject_extend(self, other, txn);
+        OOCLazyListObject_extend(self, txn, other);
         txn_commit(txn);
     } catch(const OocError& error) {
         if(txn != nullptr)
@@ -744,7 +732,7 @@ static PyObject* OOCLazyList_inplaceRepeat(PyObject* const pySelf, const Py_ssiz
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, true);
-        OOCLazyListObject_inplaceRepeat(self, count, txn);
+        OOCLazyListObject_inplaceRepeat(self, txn, count);
         txn_commit(txn);
     } catch(const OocError& error) {
         if(txn != nullptr)
@@ -757,11 +745,7 @@ static PyObject* OOCLazyList_inplaceRepeat(PyObject* const pySelf, const Py_ssiz
     return pySelf;
 }
 
-void OOCLazyListObject_inplaceRepeat(
-    OOCLazyListObject* const self,
-    const unsigned int count,
-    MDB_txn* const txn
-) {
+void OOCLazyListObject_inplaceRepeat(OOCLazyListObject* self, MDB_txn* txn, unsigned int count) {
     if(count <= 0) {
         OOCLazyListObject_clear(self, txn);
         return;
@@ -840,7 +824,7 @@ static PyObject* OOCLazyList_append(
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, true);
-        OOCLazyListObject_append(self, other, txn);
+        OOCLazyListObject_append(self, txn, other);
         txn_commit(txn);
     } catch(const OocError& error) {
         if(txn != nullptr)
@@ -852,11 +836,7 @@ static PyObject* OOCLazyList_append(
     Py_RETURN_NONE;
 }
 
-void OOCLazyListObject_append(
-    OOCLazyListObject* self,
-    PyObject* item,
-    MDB_txn* txn
-) {
+void OOCLazyListObject_append(OOCLazyListObject* self, MDB_txn* txn, PyObject* item) {
     EncodedValue encodedItem;
     Id2EncodedMap insertedItems;
     OOCMap_encode(self->ooc, item, &encodedItem, txn, insertedItems);
@@ -947,7 +927,7 @@ static int OOCLazyList_contains(PyObject* const pySelf, PyObject* const item) {
     MDB_txn* txn = nullptr;
     try {
         txn = txn_begin(self->ooc->mdb, false);
-        const Py_ssize_t index = OOCLazyListObject_index(self, item, txn);
+        const Py_ssize_t index = OOCLazyListObject_index(self, txn, item);
         txn_commit(txn);
         if(index < 0) return 0; else return 1;
     } catch(const OocError& error) {
