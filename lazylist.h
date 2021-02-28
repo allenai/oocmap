@@ -32,23 +32,12 @@ Py_ssize_t OOCLazyListObject_index(
     Py_ssize_t start,
     Py_ssize_t stop,
     MDB_txn* txn);
-Py_ssize_t OOCLazyListObject_count(
-    OOCLazyListObject* self,
-    PyObject* value,
-    MDB_txn* txn);
-void OOCLazyListObject_extend(
-    OOCLazyListObject* self,
-    PyObject* other,
-    MDB_txn* txn);
-void OOCLazyListObject_extend(
-    OOCLazyListObject* self,
-    OOCLazyListObject* other,
-    MDB_txn* txn);
-void OOCLazyListObject_append(
-    OOCLazyListObject* self,
-    PyObject* item,
-    MDB_txn* txn);
 
+Py_ssize_t OOCLazyListObject_count(OOCLazyListObject* self, PyObject* value, MDB_txn* txn);
+void OOCLazyListObject_extend(OOCLazyListObject* self, PyObject* other, MDB_txn* txn);
+void OOCLazyListObject_extend(OOCLazyListObject* self, OOCLazyListObject* other, MDB_txn* txn);
+void OOCLazyListObject_append(OOCLazyListObject* self, PyObject* item, MDB_txn* txn);
+void OOCLazyListObject_clear(OOCLazyListObject* self, MDB_txn* txn);
 
 //
 // OOCLazyListIter

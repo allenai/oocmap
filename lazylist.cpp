@@ -755,6 +755,67 @@ void OOCLazyListObject_append(
     put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
 }
 
+PyObject* OOCLazyList_clear(PyObject* const pySelf) {
+    if(pySelf->ob_type != &OOCLazyListType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
+
+    MDB_txn* txn = nullptr;
+    try {
+        txn = txn_begin(self->ooc->mdb, true);
+        OOCLazyListObject_clear(self, txn);
+        txn_commit(txn);
+        Py_RETURN_NONE;
+    } catch(const OocError& error) {
+        if(txn != nullptr)
+            txn_abort(txn);
+        error.pythonize();
+        return nullptr;
+    }
+}
+
+void OOCLazyListObject_clear(OOCLazyListObject* const self, MDB_txn* const txn) {
+    MDB_cursor* cursor = nullptr;
+    try {
+        cursor = cursor_open(txn, self->ooc->listsDb);
+
+        ListKey encodedListKey = {
+            .listIndex = 0,
+            .listId = self->listId,
+        };
+        MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
+        MDB_val mdbValue;
+        bool found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_RANGE);
+
+        while(found) {
+            if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
+            ListKey* const listItemKey = static_cast<ListKey*>(mdbKey.mv_data);
+            if(
+                listItemKey->listId != self->listId ||
+                listItemKey->listIndex == ListKey::listIndexLength
+            ) {
+                found = false;
+                break;
+            }
+
+            cursor_del(cursor);
+            found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
+        }
+
+        // cursor is now positioned at the length item, which we overwrite with 0
+        static uint32_t zeroLength = 0;
+        mdbValue = (MDB_val) { .mv_size = sizeof(zeroLength), .mv_data = &zeroLength };
+        cursor_put(cursor, &mdbKey, &mdbValue, MDB_CURRENT);
+
+        cursor_close(cursor);
+    } catch(...) {
+        if(cursor != nullptr) cursor_close(cursor);
+        throw;
+    }
+}
+
 
 static PyObject* OOCLazyList_iter(PyObject* const pySelf) {
     if(pySelf->ob_type != &OOCLazyListType) {
@@ -980,6 +1041,12 @@ static PyMethodDef OOCLazyList_methods[] = {
         (PyCFunction)OOCLazyList_append,
         METH_O,
         PyDoc_STR("appends one item to the list")
+    },
+    {
+        "clear",
+        (PyCFunction)OOCLazyList_clear,
+        METH_NOARGS,
+        PyDoc_STR("wipes the list")
     },
     {nullptr}, // sentinel
 };
