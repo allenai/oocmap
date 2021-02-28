@@ -145,6 +145,17 @@ def test_oocmap_list():
         m[0] = l    # reset
         assert m[0].eager() == l
 
+        # LazyList.__imul__(), i.e., in-place repetition
+        m[0] *= 1
+        assert m[0].eager() == l
+        m[0] *= 3
+        assert m[0].eager() == l + l + l
+        m[0] *= 0
+        assert m[0].eager() == []
+        m[0] = l    # reset
+        assert m[0].eager() == l
+
+
         # LazyList.__setitem__()
         for index in range(-5, 5):
             def assign_l():

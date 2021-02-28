@@ -734,11 +734,39 @@ static PyObject* OOCLazyList_inplaceConcat(PyObject* const pySelf, PyObject* con
     return pySelf;
 }
 
+static PyObject* OOCLazyList_inplaceRepeat(PyObject* const pySelf, const Py_ssize_t count) {
+    if(pySelf->ob_type != &OOCLazyListType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
+
+    MDB_txn* txn = nullptr;
+    try {
+        txn = txn_begin(self->ooc->mdb, true);
+        OOCLazyListObject_inplaceRepeat(self, count, txn);
+        txn_commit(txn);
+    } catch(const OocError& error) {
+        if(txn != nullptr)
+            txn_abort(txn);
+        error.pythonize();
+        return nullptr;
+    }
+
+    Py_INCREF(pySelf);
+    return pySelf;
+}
+
 void OOCLazyListObject_inplaceRepeat(
     OOCLazyListObject* const self,
     const unsigned int count,
     MDB_txn* const txn
 ) {
+    if(count <= 0) {
+        OOCLazyListObject_clear(self, txn);
+        return;
+    }
+
     const Py_ssize_t length = OOCLazyListObject_length(self, txn);
     if(length <= 0) return;
 
@@ -1152,7 +1180,7 @@ static PySequenceMethods OOCLazyList_sequence_methods = {
     .sq_ass_item = OOCLazyList_setItem,
     .sq_contains = nullptr, // TODO OOCLazyList_contains
     .sq_inplace_concat = OOCLazyList_inplaceConcat,
-    .sq_inplace_repeat = nullptr, // TODO
+    .sq_inplace_repeat = OOCLazyList_inplaceRepeat
 };
 
 PyTypeObject OOCLazyListType = {
