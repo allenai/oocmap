@@ -130,6 +130,12 @@ def test_oocmap_list():
                 lambda: item in l,
                 lambda: item in m[0])
 
+        # LazyList.__mul__()
+        for count in [-1, 0, 1, 3]:
+            assert_equal_including_exceptions(
+                lambda: l * count,
+                lambda: m[0] * count)
+
         # LazyList.append()
         m[0].append(4)
         assert m[0].eager() == [1, 2.0, "three", m[999], 4]
