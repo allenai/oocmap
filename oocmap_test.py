@@ -137,6 +137,14 @@ def test_oocmap_list():
             assert_equal_including_exceptions(delete_l, delete_m)
         assert l == m[0].eager()
 
+        # LazyList.__iadd__(), i.e., in-place concatenation
+        m[0] += m[0]
+        assert m[0].eager() == l + l
+        m[0] += l
+        assert m[0].eager() == l + l + l
+        m[0] = l    # reset
+        assert m[0].eager() == l
+
         # LazyList.__setitem__()
         for index in range(-5, 5):
             def assign_l():
@@ -150,6 +158,7 @@ def test_oocmap_list():
         # LazyList.clear()
         m[0].clear()
         assert m[0].eager() == []
+
 
 def test_oocmap_tuple():
     with tempfile.NamedTemporaryFile() as f:

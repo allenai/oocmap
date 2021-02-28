@@ -654,6 +654,11 @@ void OOCLazyListObject_extend(
     MDB_txn* const txn
 ) {
     if(other->ooc == self->ooc) {
+        if(self->listId == other->listId) {
+            OOCLazyListObject_inplaceRepeat(self, 2, txn);
+            return;
+        }
+
         ListKey selfEncodedListKey = {
             .listIndex = OOCLazyListObject_length(self, txn),
             .listId = self->listId
@@ -705,6 +710,95 @@ void OOCLazyListObject_extend(
         OOCLazyListObject_extend(self, eager, txn);
     }
 }
+
+static PyObject* OOCLazyList_inplaceConcat(PyObject* const pySelf, PyObject* const other) {
+    if(pySelf->ob_type != &OOCLazyListType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
+
+    MDB_txn* txn = nullptr;
+    try {
+        txn = txn_begin(self->ooc->mdb, true);
+        OOCLazyListObject_extend(self, other, txn);
+        txn_commit(txn);
+    } catch(const OocError& error) {
+        if(txn != nullptr)
+            txn_abort(txn);
+        error.pythonize();
+        return nullptr;
+    }
+
+    Py_INCREF(pySelf);
+    return pySelf;
+}
+
+void OOCLazyListObject_inplaceRepeat(
+    OOCLazyListObject* const self,
+    const unsigned int count,
+    MDB_txn* const txn
+) {
+    const Py_ssize_t length = OOCLazyListObject_length(self, txn);
+    if(length <= 0) return;
+
+    /*
+     * This is a little bit clever. It reads items at the start of the list, and it writes items at the
+     * end of the list. When it has gone through the original list once, it will start reading items
+     * that it wrote earlier in the same operation. This is fine. It makes the code easier.
+     */
+
+    ListKey destEncodedListKey = {
+        .listIndex = length,
+        .listId = self->listId
+    };
+    ListKey sourceEncodedListKey = {
+        .listIndex = 0,
+        .listId = self->listId
+    };
+    MDB_val mdbDestKey = {.mv_size = sizeof(destEncodedListKey), .mv_data = &destEncodedListKey};
+    MDB_val mdbSourceKey = {.mv_size = sizeof(sourceEncodedListKey), .mv_data = &sourceEncodedListKey};
+    MDB_cursor* const cursor = cursor_open(txn, self->ooc->listsDb);
+    try {
+        MDB_val mdbValue;
+        bool found = cursor_get(cursor, &mdbSourceKey, &mdbValue, MDB_SET_RANGE);
+        if(!found) throw OocError(OocError::UnexpectedData);
+        while(destEncodedListKey.listIndex < length * count) {
+            if(mdbSourceKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
+            ListKey* const listItemKey = static_cast<ListKey*>(mdbSourceKey.mv_data);
+            if(
+                listItemKey->listId != self->listId ||
+                listItemKey->listIndex == ListKey::listIndexLength
+            ) {
+                found = false;
+                break;
+            }
+
+            if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
+            put(txn, self->ooc->listsDb, &mdbDestKey, &mdbValue);
+            destEncodedListKey.listIndex += 1;
+
+            found = cursor_get(cursor, &mdbSourceKey, &mdbValue, MDB_NEXT);
+            if(!found) throw OocError(OocError::UnexpectedData);
+        }
+
+        cursor_close(cursor);
+    } catch(const MdbError& e) {
+        cursor_close(cursor);
+        if(e.mdbErrorCode != MDB_NOTFOUND)
+            throw;
+    } catch(...) {
+        cursor_close(cursor);
+        throw;
+    }
+
+    // write the new length
+    uint32_t newLength = destEncodedListKey.listIndex;
+    MDB_val mdbLength = {.mv_size = sizeof(newLength), .mv_data = &newLength};
+    destEncodedListKey.listIndex = ListKey::listIndexLength;
+    put(txn, self->ooc->listsDb, &mdbDestKey, &mdbLength);
+}
+
 
 static PyObject* OOCLazyList_append(
     PyObject* const pySelf,
@@ -815,7 +909,6 @@ void OOCLazyListObject_clear(OOCLazyListObject* const self, MDB_txn* const txn) 
         throw;
     }
 }
-
 
 static PyObject* OOCLazyList_iter(PyObject* const pySelf) {
     if(pySelf->ob_type != &OOCLazyListType) {
@@ -1058,7 +1151,7 @@ static PySequenceMethods OOCLazyList_sequence_methods = {
     .sq_item = OOCLazyList_item,
     .sq_ass_item = OOCLazyList_setItem,
     .sq_contains = nullptr, // TODO OOCLazyList_contains
-    .sq_inplace_concat = nullptr, // TODO, this is the same as extend?
+    .sq_inplace_concat = OOCLazyList_inplaceConcat,
     .sq_inplace_repeat = nullptr, // TODO
 };
 

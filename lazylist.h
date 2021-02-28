@@ -38,6 +38,7 @@ void OOCLazyListObject_extend(OOCLazyListObject* self, PyObject* other, MDB_txn*
 void OOCLazyListObject_extend(OOCLazyListObject* self, OOCLazyListObject* other, MDB_txn* txn);
 void OOCLazyListObject_append(OOCLazyListObject* self, PyObject* item, MDB_txn* txn);
 void OOCLazyListObject_clear(OOCLazyListObject* self, MDB_txn* txn);
+void OOCLazyListObject_inplaceRepeat(OOCLazyListObject* self, unsigned int count, MDB_txn* txn);
 
 //
 // OOCLazyListIter
