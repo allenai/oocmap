@@ -238,6 +238,8 @@ PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, MDB_txn* const 
                 found = false;
                 break;
             }
+            if(listItemKey->listIndex != encodedListKey.listIndex) throw OocError(OocError::UnexpectedData);
+            encodedListKey.listIndex += 1;  // We just do this to check that we're setting all the elements in the list.
 
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
@@ -380,6 +382,7 @@ Py_ssize_t OOCLazyListObject_index(
 
             found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
         }
+        if(encodedListKey.listIndex != length) throw OocError(OocError::UnexpectedData);  // We didn't set all the values in the list.
 
         cursor_close(cursor);
     } catch(...) {
