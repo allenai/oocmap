@@ -4,6 +4,7 @@
 #include "db.h"
 #include "errors.h"
 
+
 //
 // Methods that are not directly exposed to Python.
 // These throw exceptions.
@@ -137,7 +138,7 @@ static Py_ssize_t OOCLazyList_length(PyObject* const pySelf) {
 
 Py_ssize_t OOCLazyListObject_length(OOCLazyListObject* const self, MDB_txn* const txn) {
     ListKey encodedListKey = {
-        .listIndex = std::numeric_limits<uint32_t>::max(),
+        .listIndex = ListKey::listIndexLength,
         .listId = self->listId,
     };
 
@@ -145,8 +146,8 @@ Py_ssize_t OOCLazyListObject_length(OOCLazyListObject* const self, MDB_txn* cons
     MDB_val mdbValue;
     const bool found = get(txn, self->ooc->listsDb, &mdbKey, &mdbValue);
     if(!found) throw OocError(OocError::UnexpectedData);
-    if(mdbValue.mv_size != sizeof(Py_ssize_t)) throw OocError(OocError::UnexpectedData);
-    return *reinterpret_cast<Py_ssize_t*>(mdbValue.mv_data);
+    if(mdbValue.mv_size != sizeof(uint32_t)) throw OocError(OocError::UnexpectedData);
+    return *reinterpret_cast<uint32_t*>(mdbValue.mv_data);
 }
 
 static PyObject* OOCLazyList_item(PyObject* const pySelf, Py_ssize_t const index) {
@@ -225,22 +226,25 @@ PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, MDB_txn* const 
         };
         MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
         MDB_val mdbValue;
-        bool found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_KEY);
+        bool found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_RANGE);
 
         while(found) {
+            if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
+            ListKey* const listItemKey = static_cast<ListKey*>(mdbKey.mv_data);
+            if(
+                listItemKey->listId != self->listId ||
+                listItemKey->listIndex == ListKey::listIndexLength
+            ) {
+                found = false;
+                break;
+            }
+
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
             PyObject* const item = OOCMap_decode(self->ooc, encodedResult, txn);
-            PyList_SET_ITEM(result, encodedListKey.listIndex, item);
+            PyList_SET_ITEM(result, listItemKey->listIndex, item);
 
             found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
-            if(found) {
-                if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
-                ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
-                if(listKey->listIndex == std::numeric_limits<uint32_t>::max()) break;
-                if(listKey->listId != self->listId) break;
-                encodedListKey.listIndex = listKey->listIndex;
-            }
         }
 
         cursor_close(cursor);
@@ -357,7 +361,7 @@ Py_ssize_t OOCLazyListObject_index(
             if(
                 listItemKey->listIndex >= stop ||
                 listItemKey->listId != self->listId ||
-                listItemKey->listIndex == std::numeric_limits<uint32_t>::max()
+                listItemKey->listIndex == ListKey::listIndexLength
             ) {
                 found = false;
                 break;
@@ -452,7 +456,7 @@ Py_ssize_t OOCLazyListObject_count(
             ListKey* const listItemKey = static_cast<ListKey*>(mdbKey.mv_data);
             if(
                 listItemKey->listId != self->listId ||
-                listItemKey->listIndex == std::numeric_limits<uint32_t>::max()
+                listItemKey->listIndex == ListKey::listIndexLength
             ) {
                 found = false;
                 break;
@@ -493,7 +497,7 @@ static PyObject* OOCLazyList_extend(
 
     MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        txn = txn_begin(self->ooc->mdb, true);
         OOCLazyListObject_extend(self, other, txn);
         txn_commit(txn);
     } catch(const OocError& error) {
@@ -538,6 +542,7 @@ void OOCLazyListObject_extend(
             // write the new length
             uint32_t newLength = selfEncodedListKey.listIndex;
             MDB_val mdbLength = {.mv_size = sizeof(newLength), .mv_data = &newLength};
+            selfEncodedListKey.listIndex = ListKey::listIndexLength;
             put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
         } catch(...) {
             Py_DECREF(iter);
@@ -572,7 +577,7 @@ void OOCLazyListObject_extend(
                 ListKey* const listItemKey = static_cast<ListKey*>(mdbOtherKey.mv_data);
                 if(
                     listItemKey->listId != self->listId ||
-                    listItemKey->listIndex == std::numeric_limits<uint32_t>::max()
+                    listItemKey->listIndex == ListKey::listIndexLength
                 ) {
                     break;
                 }
@@ -597,12 +602,63 @@ void OOCLazyListObject_extend(
         // write the new length
         uint32_t newLength = selfEncodedListKey.listIndex;
         MDB_val mdbLength = {.mv_size = sizeof(newLength), .mv_data = &newLength};
+        selfEncodedListKey.listIndex = ListKey::listIndexLength;
         put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
     } else {
         PyObject* const eager = OOCLazyList_eager(reinterpret_cast<PyObject* const>(other));
         OOCLazyListObject_extend(self, eager, txn);
     }
 }
+
+static PyObject* OOCLazyList_append(
+    PyObject* const pySelf,
+    PyObject* const other
+) {
+    if(pySelf->ob_type != &OOCLazyListType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
+
+    MDB_txn* txn = nullptr;
+    try {
+        txn = txn_begin(self->ooc->mdb, true);
+        OOCLazyListObject_append(self, other, txn);
+        txn_commit(txn);
+    } catch(const OocError& error) {
+        if(txn != nullptr)
+            txn_abort(txn);
+        error.pythonize();
+        return nullptr;
+    }
+
+    Py_RETURN_NONE;
+}
+
+void OOCLazyListObject_append(
+    OOCLazyListObject* self,
+    PyObject* item,
+    MDB_txn* txn
+) {
+    EncodedValue encodedItem;
+    Id2EncodedMap insertedItems;
+    OOCMap_encode(self->ooc, item, &encodedItem, txn, insertedItems);
+
+    ListKey selfEncodedListKey = {
+        .listIndex = OOCLazyListObject_length(self, txn),
+        .listId = self->listId
+    };
+    MDB_val mdbSelfKey = {.mv_size = sizeof(selfEncodedListKey), .mv_data = &selfEncodedListKey};
+    MDB_val mdbValue = {.mv_size = sizeof(encodedItem), .mv_data = &encodedItem};
+    put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbValue);
+
+    // write the new length
+    uint32_t newLength = selfEncodedListKey.listIndex + 1;
+    MDB_val mdbLength = {.mv_size = sizeof(newLength), .mv_data = &newLength};
+    selfEncodedListKey.listIndex = ListKey::listIndexLength;
+    put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
+}
+
 
 static PyObject* OOCLazyList_iter(PyObject* const pySelf) {
     if(pySelf->ob_type != &OOCLazyListType) {
@@ -677,7 +733,7 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             if(mdbKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
             ListKey* const listKey = static_cast<ListKey* const>(mdbKey.mv_data);
             if(
-                listKey->listIndex == std::numeric_limits<uint32_t>::max() ||
+                listKey->listIndex == ListKey::listIndexLength ||
                 listKey->listId != self->list->listId
             ) {
                 cursor_close(self->cursor);
@@ -823,6 +879,11 @@ static PyMethodDef OOCLazyList_methods[] = {
         (PyCFunction)OOCLazyList_extend,
         METH_O,
         PyDoc_STR("appends one list to another")
+    }, {
+        "append",
+        (PyCFunction)OOCLazyList_append,
+        METH_O,
+        PyDoc_STR("appends one item to the list")
     },
     {nullptr}, // sentinel
 };

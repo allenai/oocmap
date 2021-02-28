@@ -44,6 +44,10 @@ void OOCLazyListObject_extend(
     OOCLazyListObject* self,
     OOCLazyListObject* other,
     MDB_txn* txn);
+void OOCLazyListObject_append(
+    OOCLazyListObject* self,
+    PyObject* item,
+    MDB_txn* txn);
 
 
 //

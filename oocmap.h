@@ -29,6 +29,8 @@ struct ListKey {
     // On a big-endian platform, these will likely have to be reversed.
     uint32_t listIndex;
     uint32_t listId;
+
+    static const uint32_t listIndexLength;
 };
 
 struct DictKey {

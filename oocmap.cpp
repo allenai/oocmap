@@ -12,6 +12,8 @@
 
 static std::mt19937 random_engine(std::chrono::system_clock::now().time_since_epoch().count());
 
+const uint32_t ListKey::listIndexLength = std::numeric_limits<uint32_t>::max();
+
 
 //
 // Functions that are not exposed to Python
@@ -226,13 +228,14 @@ void OOCMap_encode(
     // Python's list objects
     if(PyList_CheckExact(value)) {
         dest->typeCode = TYPE_CODE_LIST;
-        dest->asListKey.listIndex = std::numeric_limits<uint32_t>::max();
+        dest->asListKey.listIndex = ListKey::listIndexLength;
         MDB_val mdbKey = { .mv_size = sizeof(dest->asListKey), .mv_data = &dest->asListKey };
+        uint32_t length = Py_SIZE(value);
 
         // find a key
         while(true) {
             dest->asListKey.listId = random_engine();
-            MDB_val mdbValue = { .mv_size = sizeof(Py_ssize_t), .mv_data = &Py_SIZE(value)};
+            MDB_val mdbValue = { .mv_size = sizeof(uint32_t), .mv_data = &length};
             try {
                 put(txn, self->listsDb, &mdbKey, &mdbValue, MDB_NODUPDATA);
             } catch(const MdbError& e) {
