@@ -189,6 +189,99 @@ static PyObject* OOCLazyList_item(PyObject* const pySelf, Py_ssize_t const index
     }
 }
 
+static int OOCLazyList_setItem(
+    PyObject* const pySelf,
+    const Py_ssize_t index,
+    PyObject* const item
+) {
+    if(index < 0) {
+        // Negative indices are already handled for us. If we get one now, it's an
+        // automatic IndexError.
+        PyErr_Format(PyExc_IndexError, "list index out of range");
+        return -1;
+    }
+
+    if(pySelf->ob_type != &OOCLazyListType) {
+        PyErr_BadArgument();
+        return -1;
+    }
+    OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
+
+    ListKey encodedListKey = {
+        .listIndex = index,
+        .listId = self->listId,
+    };
+    MDB_txn* txn = nullptr;
+    MDB_cursor* sourceCursor = nullptr;
+    MDB_cursor* destCursor = nullptr;
+    try {
+        txn = txn_begin(self->ooc->mdb, true);
+        if(item == nullptr) {
+            // We're deleting the item by moving all items after it forwards by one.
+            MDB_val mdbValue;
+            destCursor = cursor_open(txn, self->ooc->listsDb);
+            MDB_val mdbDestKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
+            bool destFound = cursor_get(destCursor, &mdbDestKey, &mdbValue, MDB_SET_KEY);
+            if(!destFound) throw OocError(OocError::IndexError);
+
+            sourceCursor = cursor_open(txn, self->ooc->listsDb);
+            encodedListKey.listIndex += 1;
+            MDB_val mdbSourceKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
+            bool sourceFound = cursor_get(sourceCursor, &mdbSourceKey, &mdbValue, MDB_SET_RANGE);
+
+            while(sourceFound) {
+                if(mdbSourceKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
+                ListKey* const sourceListKey = reinterpret_cast<ListKey*>(mdbSourceKey.mv_data);
+                if(
+                    sourceListKey->listIndex == ListKey::listIndexLength ||
+                    sourceListKey->listId != self->listId
+                ) {
+                    sourceFound = false;
+                    break;
+                }
+
+                cursor_put(destCursor, &mdbDestKey, &mdbValue, MDB_CURRENT);
+
+                destFound = cursor_get(destCursor, &mdbDestKey, &mdbValue, MDB_NEXT);
+                if(!destFound) throw OocError(OocError::UnexpectedData);  // If we found the source before, we must find it again now.
+                sourceFound = cursor_get(sourceCursor, &mdbSourceKey, &mdbValue, MDB_NEXT);
+            }
+
+            // sourceCursor now points to the length item, which must be updated
+            // destCursor now points to the last item, the one we're about to delete. The index of that
+            // item is the new length.
+            if(mdbDestKey.mv_size != sizeof(ListKey)) throw OocError(OocError::UnexpectedData);
+            ListKey* const destListKey = reinterpret_cast<ListKey*>(mdbDestKey.mv_data);
+            mdbValue = (MDB_val) { .mv_size = sizeof(destListKey->listIndex), .mv_data = &destListKey->listIndex };
+            cursor_put(sourceCursor, &mdbDestKey, &mdbValue, MDB_CURRENT);
+            cursor_close(sourceCursor);
+
+            // destCursor now points to the last item and must be deleted
+            cursor_del(destCursor);
+            cursor_close(destCursor);
+        } else {
+            // We're setting the item.
+            const Py_ssize_t length = OOCLazyListObject_length(self, txn);
+            if(index >= length) throw OocError(OocError::IndexError);
+
+            Id2EncodedMap insertedItems;
+            EncodedValue encodedItem;
+            OOCMap_encode(self->ooc, item, &encodedItem, txn, insertedItems);
+            MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
+            MDB_val mdbValue = { .mv_size = sizeof(encodedItem), .mv_data = &encodedItem };
+            put(txn, self->ooc->listsDb, &mdbKey, &mdbValue);
+        }
+        txn_commit(txn);
+        return 0;
+    } catch(const OocError& error) {
+        if(sourceCursor != nullptr) cursor_close(sourceCursor);
+        if(destCursor != nullptr) cursor_close(destCursor);
+        if(txn != nullptr) txn_abort(txn);
+        error.pythonize();
+        return -1;
+    }
+}
+
 PyObject* OOCLazyList_eager(PyObject* const pySelf) {
     if(pySelf->ob_type != &OOCLazyListType) {
         PyErr_BadArgument();
@@ -248,6 +341,7 @@ PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, MDB_txn* const 
 
             found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
         }
+        if(encodedListKey.listIndex != length) throw OocError(OocError::UnexpectedData);  // We didn't set all the values in the list.
 
         cursor_close(cursor);
     } catch(...) {
@@ -382,7 +476,6 @@ Py_ssize_t OOCLazyListObject_index(
 
             found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
         }
-        if(encodedListKey.listIndex != length) throw OocError(OocError::UnexpectedData);  // We didn't set all the values in the list.
 
         cursor_close(cursor);
     } catch(...) {
@@ -896,7 +989,10 @@ static PySequenceMethods OOCLazyList_sequence_methods = {
     .sq_concat = nullptr, // TODO OOCLazyList_concat,
     .sq_repeat = nullptr, // TODO OOCLazyList_repeat,
     .sq_item = OOCLazyList_item,
+    .sq_ass_item = OOCLazyList_setItem,
     .sq_contains = nullptr, // TODO OOCLazyList_contains
+    .sq_inplace_concat = nullptr, // TODO, this is the same as extend?
+    .sq_inplace_repeat = nullptr, // TODO
 };
 
 PyTypeObject OOCLazyListType = {
