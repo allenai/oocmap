@@ -1129,6 +1129,11 @@ PyObject* OOCLazyList_richcompare(PyObject* const pySelf, PyObject* const other,
                 return _computeRichcompareResult(1, op);
             }
 
+            // We have to check for equality first because inequality isn't defined for everything.
+            const int equal = PyObject_RichCompareBool(selfItem, otherItem, Py_EQ);
+            if(equal < 0) return nullptr;
+            if(equal) continue;
+
             const int lessThan = PyObject_RichCompareBool(selfItem, otherItem, Py_LT);
             if(lessThan < 0) return nullptr;
             if(lessThan) return _computeRichcompareResult(-1, op);
