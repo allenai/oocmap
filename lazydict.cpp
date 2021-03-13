@@ -167,24 +167,21 @@ static Py_ssize_t OOCLazyDict_length(PyObject* const pySelf) {
     }
     OOCLazyDictObject* const self = reinterpret_cast<OOCLazyDictObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
         Py_ssize_t const result = OOCLazyDictObject_length(self, txn);
-        txn_commit(txn);
+        txn.commit();
         return result;
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return -1;
     }
 }
 
-Py_ssize_t OOCLazyDictObject_length(OOCLazyDictObject* const self, MDB_txn* const txn) {
+Py_ssize_t OOCLazyDictObject_length(OOCLazyDictObject* const self, OOCTransaction& txn) {
     MDB_val mdbKey = { .mv_size = sizeof(self->dictId), .mv_data = &self->dictId };
     MDB_val mdbValue;
-    const bool found = get(txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
+    const bool found = get(txn.txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
     if(!found) throw OocError(OocError::UnexpectedData);
     if(mdbValue.mv_size != sizeof(Py_ssize_t)) throw OocError(OocError::UnexpectedData);
     return *reinterpret_cast<Py_ssize_t*>(mdbValue.mv_data);
@@ -206,24 +203,24 @@ static int OOCLazyDict_insert(PyObject* pySelf, PyObject* key, PyObject* value) 
     }
     OOCLazyDictObject* const self = reinterpret_cast<OOCLazyDictObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        Id2EncodedMap insertedItemsInThisTransaction;
-        txn = txn_begin(self->ooc->mdb, true);
+        OOCTransaction txn(self->ooc, false);
 
-        DictItemKey encodedKey = { .dictId = self->dictId };
-        OOCMap_encode(self->ooc, key, &encodedKey.key, txn, insertedItemsInThisTransaction);
-        EncodedValue encodedValue;
-        OOCMap_encode(self->ooc, key, &encodedValue, txn, insertedItemsInThisTransaction);
+        DictItemKey encodedKey = {
+            .dictId = self->dictId,
+            .key = *OOCMap_encode(self->ooc, key, txn)
+        };
+        const EncodedValue* const encodedValue = OOCMap_encode(self->ooc, key, txn);
 
         MDB_val mdbKey = { .mv_size = sizeof(encodedKey), .mv_data = &encodedKey };
-        MDB_val mdbValue = { .mv_size = sizeof(encodedValue), .mv_data = &encodedValue };
-        put(txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
+        MDB_val mdbValue = {
+            .mv_size = sizeof(*encodedValue),
+            .mv_data = const_cast<EncodedValue*>(encodedValue)
+        };
+        put(txn.txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
 
-        txn_commit(txn);
+        txn.commit();
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return -1;
     }
@@ -238,28 +235,24 @@ static PyObject* OOCLazyDict_get(PyObject* const pySelf, PyObject* const key) {
     }
     OOCLazyDictObject* const self = reinterpret_cast<OOCLazyDictObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        Id2EncodedMap insertedItemsInThisTransaction;
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
 
-        DictItemKey encodedItemKey = { .dictId = self->dictId };
-        OOCMap_encode(self->ooc, key, &encodedItemKey.key, txn, insertedItemsInThisTransaction, true);
-
+        DictItemKey encodedItemKey = {
+            .dictId = self->dictId,
+            .key = *OOCMap_encode(self->ooc, key, txn)
+        };
         MDB_val mdbKey = { .mv_size = sizeof(encodedItemKey), .mv_data = &encodedItemKey };
         MDB_val mdbValue;
-        const bool found = get(txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
-        if(!found)
-            throw OocError(OocError::ImmutableValueNotFound);
+        const bool found = get(txn.txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
+        if(!found) throw OocError(OocError::ImmutableValueNotFound);
 
         if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
         EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
         PyObject* const result = OOCMap_decode(self->ooc, encodedResult, txn);
-        txn_commit(txn);
+        txn.commit();
         return result;
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         if(error.errorCode == OocError::ImmutableValueNotFound)
             PyErr_SetObject(PyExc_KeyError, key);
         else
@@ -275,25 +268,22 @@ PyObject* OOCLazyDict_eager(PyObject* const pySelf) {
     }
     OOCLazyDictObject* const self = reinterpret_cast<OOCLazyDictObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
         return OOCLazyDictObject_eager(self, txn);
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
 }
 
-PyObject* OOCLazyDictObject_eager(OOCLazyDictObject* const self, MDB_txn* const txn) {
+PyObject* OOCLazyDictObject_eager(OOCLazyDictObject* const self, OOCTransaction& txn) {
     PyObject* result = nullptr;
     MDB_cursor* cursor = nullptr;
     try {
         result = PyDict_New();
         if(result == nullptr) throw OocError(OocError::OutOfMemory);
-        cursor = cursor_open(txn, self->ooc->dictsDb);
+        cursor = cursor_open(txn.txn, self->ooc->dictsDb);
 
         MDB_val mdbKey = { .mv_size = sizeof(self->dictId), .mv_data = &self->dictId };
         MDB_val mdbValue;
@@ -320,11 +310,21 @@ PyObject* OOCLazyDictObject_eager(OOCLazyDictObject* const self, MDB_txn* const 
 
         cursor_close(cursor);
     } catch(...) {
-        if(result != nullptr) Py_DECREF(result);
         if(cursor != nullptr) cursor_close(cursor);
+        if(result != nullptr) Py_DECREF(result);
         throw;
     }
 
+    return result;
+}
+
+static PyObject* OOCLazyDict_richcompare(PyObject* const pySelf, PyObject* const other, const int op) {
+    // TODO: Maybe we can do something faster than using eager? At least something that fails fast
+    // when the objects are not equal?
+    PyObject* const eager = OOCLazyDict_eager(pySelf);
+    if(eager == nullptr) return nullptr;
+    PyObject* result = PyObject_RichCompare(eager, other, op);
+    Py_DECREF(eager);
     return result;
 }
 
@@ -407,8 +407,9 @@ static PyObject* OOCLazyDictItemsIter_iternext(PyObject* const pySelf) {
             throw OocError(OocError::UnexpectedData);
         EncodedValue* const dictItemValue = static_cast<EncodedValue* const>(mdbValue.mv_data);
 
-        pyKey = OOCMap_decode(ooc, &dictItemKey->key, txn);
-        pyValue = OOCMap_decode(ooc, dictItemValue, txn);
+        OOCTransaction oocTxn(txn, true);
+        pyKey = OOCMap_decode(ooc, &dictItemKey->key, oocTxn);
+        pyValue = OOCMap_decode(ooc, dictItemValue, oocTxn);
     } catch(const OocError& error) {
         cursor_close(self->cursor);
         self->cursor = nullptr;
@@ -463,6 +464,7 @@ PyTypeObject OOCLazyDictType = {
     .tp_as_mapping = &OOCLazyDict_mapping_methods,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_doc = "A dict-like class that's backed by an OOCMap",
+    .tp_richcompare = OOCLazyDict_richcompare,
     .tp_iter = nullptr,  // TODO?
     .tp_methods = OOCLazyDict_methods,
     .tp_init = (initproc)OOCLazyDict_init,

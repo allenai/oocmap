@@ -258,7 +258,11 @@ def test_oocmap_dict():
 
         d = {
             1: "uno",
-            "two": (2, "zwei", [2, 2]),
+            "two": (
+                2,
+                "zwei",
+                [2, 2]
+            ),
             (3, 3, "drei"): {
                 "north": ("u", "p"),
                 "east": ["right"],
@@ -272,6 +276,8 @@ def test_oocmap_dict():
             (1,(m[999],)): "quell"
         }
         m[0] = d
+
+        assert m[0].eager() == d
         assert m[0] == d
         assert d == m[0]
 
@@ -354,8 +360,17 @@ def test_two_oocmaps():
             m1[1033] = ["one", "two", "three"]
             m1[1031] = ["eins", "zwei", "drei"]
             m1[1041] = ["一", "二", "三"]
+            assert m1[1033].eager() == ["one", "two", "three"]
+            assert m1[1031].eager() == ["eins", "zwei", "drei"]
+            assert m1[1041].eager() == ["一", "二", "三"]
+            assert m1[1033] == ["one", "two", "three"]
+            assert m1[1031] == ["eins", "zwei", "drei"]
+            assert m1[1041] == ["一", "二", "三"]
+
             m2[0] = [m1[1033], m1[1031], m1[1041]]
+
+            assert m2[0].eager()[0].eager() == ["one", "two", "three"]
+            assert m2[0].eager()[1].eager() == ["eins", "zwei", "drei"]
+            assert m2[0].eager()[2].eager() == ["一", "二", "三"]
+            assert m2[0].eager() == [["one", "two", "three"], ["eins", "zwei", "drei"], ["一", "二", "三"]]
             assert m2[0] == [["one", "two", "three"], ["eins", "zwei", "drei"], ["一", "二", "三"]]
-
-
-

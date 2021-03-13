@@ -122,21 +122,18 @@ static Py_ssize_t OOCLazyList_length(PyObject* const pySelf) {
     }
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
         const Py_ssize_t result = OOCLazyListObject_length(self, txn);
-        txn_commit(txn);
+        txn.commit();
         return result;
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return -1;
     }
 }
 
-Py_ssize_t OOCLazyListObject_length(OOCLazyListObject* const self, MDB_txn* const txn) {
+Py_ssize_t OOCLazyListObject_length(OOCLazyListObject* const self, OOCTransaction& txn) {
     ListKey encodedListKey = {
         .listIndex = ListKey::listIndexLength,
         .listId = self->listId,
@@ -144,7 +141,7 @@ Py_ssize_t OOCLazyListObject_length(OOCLazyListObject* const self, MDB_txn* cons
 
     MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
     MDB_val mdbValue;
-    const bool found = get(txn, self->ooc->listsDb, &mdbKey, &mdbValue);
+    const bool found = get(txn.txn, self->ooc->listsDb, &mdbKey, &mdbValue);
     if(!found) throw OocError(OocError::UnexpectedData);
     if(mdbValue.mv_size != sizeof(uint32_t)) throw OocError(OocError::UnexpectedData);
     return *reinterpret_cast<uint32_t*>(mdbValue.mv_data);
@@ -169,21 +166,18 @@ static PyObject* OOCLazyList_item(PyObject* const pySelf, Py_ssize_t const index
         .listId = self->listId,
     };
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
         MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
         MDB_val mdbValue;
-        const bool found = get(txn, self->ooc->listsDb, &mdbKey, &mdbValue);
+        const bool found = get(txn.txn, self->ooc->listsDb, &mdbKey, &mdbValue);
         if(!found) throw OocError(OocError::IndexError);
         if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
         EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
         PyObject* const result = OOCMap_decode(self->ooc, encodedResult, txn);
-        txn_commit(txn);
+        txn.commit();
         return result;
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
@@ -211,20 +205,19 @@ static int OOCLazyList_setItem(
         .listIndex = index,
         .listId = self->listId,
     };
-    MDB_txn* txn = nullptr;
+    OOCTransaction txn(self->ooc, false);
     MDB_cursor* sourceCursor = nullptr;
     MDB_cursor* destCursor = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, true);
         if(item == nullptr) {
             // We're deleting the item by moving all items after it forwards by one.
             MDB_val mdbValue;
-            destCursor = cursor_open(txn, self->ooc->listsDb);
+            destCursor = cursor_open(txn.txn, self->ooc->listsDb);
             MDB_val mdbDestKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
             bool destFound = cursor_get(destCursor, &mdbDestKey, &mdbValue, MDB_SET_KEY);
             if(!destFound) throw OocError(OocError::IndexError);
 
-            sourceCursor = cursor_open(txn, self->ooc->listsDb);
+            sourceCursor = cursor_open(txn.txn, self->ooc->listsDb);
             encodedListKey.listIndex += 1;
             MDB_val mdbSourceKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
             bool sourceFound = cursor_get(sourceCursor, &mdbSourceKey, &mdbValue, MDB_SET_RANGE);
@@ -265,18 +258,19 @@ static int OOCLazyList_setItem(
             if(index >= length) throw OocError(OocError::IndexError);
 
             Id2EncodedMap insertedItems;
-            EncodedValue encodedItem;
-            OOCMap_encode(self->ooc, item, &encodedItem, txn, insertedItems);
+            const EncodedValue* const encodedItem = OOCMap_encode(self->ooc, item, txn);
             MDB_val mdbKey = { .mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey };
-            MDB_val mdbValue = { .mv_size = sizeof(encodedItem), .mv_data = &encodedItem };
-            put(txn, self->ooc->listsDb, &mdbKey, &mdbValue);
+            MDB_val mdbValue = {
+                .mv_size = sizeof(*encodedItem),
+                .mv_data = const_cast<EncodedValue*>(encodedItem)
+            };
+            put(txn.txn, self->ooc->listsDb, &mdbKey, &mdbValue);
         }
-        txn_commit(txn);
+        txn.commit();
         return 0;
     } catch(const OocError& error) {
         if(sourceCursor != nullptr) cursor_close(sourceCursor);
         if(destCursor != nullptr) cursor_close(destCursor);
-        if(txn != nullptr) txn_abort(txn);
         error.pythonize();
         return -1;
     }
@@ -289,21 +283,19 @@ PyObject* OOCLazyList_eager(PyObject* const pySelf) {
     }
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
         PyObject* const result = OOCLazyListObject_eager(self, txn);
-        txn_commit(txn);
+        txn.commit();
+        PyObject_Print(result, stderr, Py_PRINT_RAW);
         return result;
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
 }
 
-PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, MDB_txn* const txn) {
+PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, OOCTransaction& txn) {
     const Py_ssize_t length = OOCLazyListObject_length(self, txn);
     PyObject* result = nullptr;
     MDB_cursor* cursor = nullptr;
@@ -311,7 +303,7 @@ PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, MDB_txn* const 
         result = PyList_New(length);
         if(result == nullptr) throw OocError(OocError::OutOfMemory);
         if(length <= 0) return result;
-        cursor = cursor_open(txn, self->ooc->listsDb);
+        cursor = cursor_open(txn.txn, self->ooc->listsDb);
 
         ListKey encodedListKey = {
             .listIndex = 0,
@@ -345,8 +337,8 @@ PyObject* OOCLazyListObject_eager(OOCLazyListObject* const self, MDB_txn* const 
 
         cursor_close(cursor);
     } catch(...) {
-        if(result != nullptr) Py_DECREF(result);
         if(cursor != nullptr) cursor_close(cursor);
+        if(result != nullptr) Py_DECREF(result);
         throw;
     }
 
@@ -384,14 +376,11 @@ static PyObject* OOCLazyList_index(
     }
 
     Py_ssize_t index;
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
         index = OOCLazyListObject_index(self, txn, value, start, stop);
-        txn_commit(txn);
+        txn.commit();
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
@@ -406,7 +395,7 @@ static PyObject* OOCLazyList_index(
 
 Py_ssize_t OOCLazyListObject_index(
     OOCLazyListObject* self,
-    MDB_txn* txn,
+    OOCTransaction& txn,
     PyObject* value,
     Py_ssize_t start,
     Py_ssize_t stop
@@ -427,14 +416,19 @@ Py_ssize_t OOCLazyListObject_index(
     }
 
     Id2EncodedMap insertedItemsInThisTransaction;
-    EncodedValue encodedValue;
+    const EncodedValue* encodedValue = nullptr;
     try {
-        OOCMap_encode(self->ooc, value, &encodedValue, txn, insertedItemsInThisTransaction, true);
+        const bool oldReadonly = txn.readonly;
+        txn.readonly = true;
+        encodedValue = OOCMap_encode(self->ooc, value, txn);
+        txn.readonly = oldReadonly;
     } catch(const MdbError& e) {
         if(e.mdbErrorCode != EACCES) throw;
+        // TODO: This does not really work, because it relies on txn really being readonly, whereas
+        // we might just be faking it.
+
         // We tried to write the value in a readonly transaction, so we got the EACCES error. This must
         // mean the value is a mutable value. The only thing we can do is search linearly through the list.
-        encodedValue.typeCodeWithLength = 0xff;  // Mark the encoded value as unusable
     } catch(const OocError& e) {
         if(e.errorCode != OocError::ImmutableValueNotFound) throw;
         // Needle is immutable but not inserted into the map, so we know for sure we won't find it.
@@ -447,7 +441,7 @@ Py_ssize_t OOCLazyListObject_index(
     };
     MDB_val mdbKey = {.mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey};
     MDB_val mdbValue;
-    MDB_cursor* const cursor = cursor_open(txn, self->ooc->listsDb);
+    MDB_cursor* const cursor = cursor_open(txn.txn, self->ooc->listsDb);
     bool found;
     try {
         found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_SET_RANGE);
@@ -465,12 +459,12 @@ Py_ssize_t OOCLazyListObject_index(
 
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedItem = static_cast<EncodedValue* const>(mdbValue.mv_data);
-            if(encodedValue.typeCodeWithLength == 0xff) {
+            if(encodedValue == nullptr) {
                 PyObject* const item = OOCMap_decode(self->ooc, encodedItem, txn);
                 if(PyObject_RichCompareBool(value, item, Py_EQ))
                     break;
             } else {
-                if(encodedValue == *encodedItem)
+                if(*encodedValue == *encodedItem)
                     break;
             }
 
@@ -501,14 +495,11 @@ static PyObject* OOCLazyList_count(
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
 
     Py_ssize_t count;
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
         count = OOCLazyListObject_count(self, txn, value);
-        txn_commit(txn);
+        txn.commit();
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
@@ -516,16 +507,21 @@ static PyObject* OOCLazyList_count(
     return PyLong_FromSsize_t(count);
 }
 
-Py_ssize_t OOCLazyListObject_count(OOCLazyListObject* self, MDB_txn* txn, PyObject* value) {
+Py_ssize_t OOCLazyListObject_count(OOCLazyListObject* self, OOCTransaction& txn, PyObject* value) {
     Id2EncodedMap insertedItemsInThisTransaction;
-    EncodedValue encodedValue;
+    const EncodedValue* encodedValue = nullptr;
     try {
-        OOCMap_encode(self->ooc, value, &encodedValue, txn, insertedItemsInThisTransaction, true);
+        const bool oldReadonly = txn.readonly;
+        txn.readonly = true;
+        encodedValue = OOCMap_encode(self->ooc, value, txn);
+        txn.readonly = oldReadonly;
     } catch(const MdbError& e) {
         if(e.mdbErrorCode != EACCES) throw;
+        // TODO: This does not really work, because it relies on txn really being readonly, whereas
+        // we might just be faking it.
+
         // We tried to write the value in a readonly transaction, so we got the EACCES error. This must
         // mean the value is a mutable value. The only thing we can do is search linearly through the list.
-        encodedValue.typeCodeWithLength = 0xff;  // Mark the encoded value as unusable
     } catch(const OocError& e) {
         if(e.errorCode != OocError::ImmutableValueNotFound) throw;
         // Needle is immutable but not inserted into the map, so we know for sure we won't find it.
@@ -537,7 +533,7 @@ Py_ssize_t OOCLazyListObject_count(OOCLazyListObject* self, MDB_txn* txn, PyObje
         .listId = self->listId,
     };
     Py_ssize_t count = 0;
-    MDB_cursor* const cursor = cursor_open(txn, self->ooc->listsDb);
+    MDB_cursor* const cursor = cursor_open(txn.txn, self->ooc->listsDb);
     try {
         MDB_val mdbKey = {.mv_size = sizeof(encodedListKey), .mv_data = &encodedListKey};
         MDB_val mdbValue;
@@ -556,12 +552,12 @@ Py_ssize_t OOCLazyListObject_count(OOCLazyListObject* self, MDB_txn* txn, PyObje
 
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedItem = static_cast<EncodedValue* const>(mdbValue.mv_data);
-            if(encodedValue.typeCodeWithLength == 0xff) {
+            if(encodedValue == nullptr) {
                 PyObject* const item = OOCMap_decode(self->ooc, encodedItem, txn);
                 if(PyObject_RichCompareBool(value, item, Py_EQ))
                     count += 1;
             } else {
-                if(encodedValue == *encodedItem)
+                if(*encodedValue == *encodedItem)
                     count += 1;
             }
 
@@ -587,14 +583,11 @@ static PyObject* OOCLazyList_extend(
     }
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, true);
+        OOCTransaction txn(self->ooc, false);
         OOCLazyListObject_extend(self, txn, other);
-        txn_commit(txn);
+        txn.commit();
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
@@ -602,12 +595,11 @@ static PyObject* OOCLazyList_extend(
     Py_RETURN_NONE;
 }
 
-void OOCLazyListObject_extend(OOCLazyListObject* self, MDB_txn* txn, PyObject* pyOther) {
+void OOCLazyListObject_extend(OOCLazyListObject* self, OOCTransaction& txn, PyObject* pyOther) {
     if(pyOther->ob_type == &OOCLazyListType) {
         OOCLazyListObject* const other = reinterpret_cast<OOCLazyListObject*>(pyOther);
         OOCLazyListObject_extend(self, txn, other);
     } else {
-        PyObject* item = nullptr;
         PyObject* const iter = PyObject_GetIter(pyOther);
         if(iter == nullptr) throw OocError(OocError::AlreadyPythonizedError);
         try {
@@ -616,14 +608,16 @@ void OOCLazyListObject_extend(OOCLazyListObject* self, MDB_txn* txn, PyObject* p
                 .listId = self->listId
             };
             MDB_val mdbSelfKey = {.mv_size = sizeof(selfEncodedListKey), .mv_data = &selfEncodedListKey};
-            EncodedValue encodedItem;
-            MDB_val mdbValue = {.mv_size = sizeof(encodedItem), .mv_data = &encodedItem};
-            Id2EncodedMap insertedItems;
 
+            PyObject* item;
             while((item = PyIter_Next(iter))) {
-                OOCMap_encode(self->ooc, item, &encodedItem, txn, insertedItems);
-                put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbValue);
-                Py_CLEAR(item);
+                const EncodedValue* const encodedItem = OOCMap_encode(self->ooc, item, txn);
+                Py_DECREF(item);
+                MDB_val mdbValue = {
+                    .mv_size = sizeof(*encodedItem),
+                    .mv_data = const_cast<EncodedValue*>(encodedItem)
+                };
+                put(txn.txn, self->ooc->listsDb, &mdbSelfKey, &mdbValue);
                 selfEncodedListKey.listIndex += 1;
             }
 
@@ -631,16 +625,16 @@ void OOCLazyListObject_extend(OOCLazyListObject* self, MDB_txn* txn, PyObject* p
             uint32_t newLength = selfEncodedListKey.listIndex;
             MDB_val mdbLength = {.mv_size = sizeof(newLength), .mv_data = &newLength};
             selfEncodedListKey.listIndex = ListKey::listIndexLength;
-            put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
+            put(txn.txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
+            Py_DECREF(iter);
         } catch(...) {
             Py_DECREF(iter);
-            if(item != nullptr) Py_DECREF(item);
             throw;
         }
     }
 }
 
-void OOCLazyListObject_extend(OOCLazyListObject* self, MDB_txn* txn, OOCLazyListObject* other) {
+void OOCLazyListObject_extend(OOCLazyListObject* self, OOCTransaction& txn, OOCLazyListObject* other) {
     if(other->ooc == self->ooc) {
         if(self->listId == other->listId) {
             OOCLazyListObject_inplaceRepeat(self, txn, 2);
@@ -657,7 +651,7 @@ void OOCLazyListObject_extend(OOCLazyListObject* self, MDB_txn* txn, OOCLazyList
         };
         MDB_val mdbSelfKey = {.mv_size = sizeof(selfEncodedListKey), .mv_data = &selfEncodedListKey};
         MDB_val mdbOtherKey = {.mv_size = sizeof(otherEncodedListKey), .mv_data = &otherEncodedListKey};
-        MDB_cursor* const cursor = cursor_open(txn, other->ooc->listsDb);
+        MDB_cursor* const cursor = cursor_open(txn.txn, other->ooc->listsDb);
         try {
             MDB_val mdbValue;
             bool found = cursor_get(cursor, &mdbOtherKey, &mdbValue, MDB_SET_RANGE);
@@ -672,7 +666,7 @@ void OOCLazyListObject_extend(OOCLazyListObject* self, MDB_txn* txn, OOCLazyList
                 }
 
                 if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
-                put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbValue);
+                put(txn.txn, self->ooc->listsDb, &mdbSelfKey, &mdbValue);
                 selfEncodedListKey.listIndex += 1;
 
                 found = cursor_get(cursor, &mdbOtherKey, &mdbValue, MDB_NEXT);
@@ -692,7 +686,7 @@ void OOCLazyListObject_extend(OOCLazyListObject* self, MDB_txn* txn, OOCLazyList
         uint32_t newLength = selfEncodedListKey.listIndex;
         MDB_val mdbLength = {.mv_size = sizeof(newLength), .mv_data = &newLength};
         selfEncodedListKey.listIndex = ListKey::listIndexLength;
-        put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
+        put(txn.txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
     } else {
         PyObject* const eager = OOCLazyList_eager(reinterpret_cast<PyObject* const>(other));
         OOCLazyListObject_extend(self, txn, eager);
@@ -706,14 +700,11 @@ static PyObject* OOCLazyList_inplaceConcat(PyObject* const pySelf, PyObject* con
     }
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, true);
+        OOCTransaction txn(self->ooc, false);
         OOCLazyListObject_extend(self, txn, other);
-        txn_commit(txn);
+        txn.commit();
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
@@ -729,14 +720,11 @@ static PyObject* OOCLazyList_inplaceRepeat(PyObject* const pySelf, const Py_ssiz
     }
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, true);
+        OOCTransaction txn(self->ooc, false);
         OOCLazyListObject_inplaceRepeat(self, txn, count);
-        txn_commit(txn);
+        txn.commit();
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
@@ -745,7 +733,7 @@ static PyObject* OOCLazyList_inplaceRepeat(PyObject* const pySelf, const Py_ssiz
     return pySelf;
 }
 
-void OOCLazyListObject_inplaceRepeat(OOCLazyListObject* self, MDB_txn* txn, unsigned int count) {
+void OOCLazyListObject_inplaceRepeat(OOCLazyListObject* self, OOCTransaction& txn, unsigned int count) {
     if(count <= 0) {
         OOCLazyListObject_clear(self, txn);
         return;
@@ -770,7 +758,7 @@ void OOCLazyListObject_inplaceRepeat(OOCLazyListObject* self, MDB_txn* txn, unsi
     };
     MDB_val mdbDestKey = {.mv_size = sizeof(destEncodedListKey), .mv_data = &destEncodedListKey};
     MDB_val mdbSourceKey = {.mv_size = sizeof(sourceEncodedListKey), .mv_data = &sourceEncodedListKey};
-    MDB_cursor* const cursor = cursor_open(txn, self->ooc->listsDb);
+    MDB_cursor* const cursor = cursor_open(txn.txn, self->ooc->listsDb);
     try {
         MDB_val mdbValue;
         bool found = cursor_get(cursor, &mdbSourceKey, &mdbValue, MDB_SET_RANGE);
@@ -787,7 +775,7 @@ void OOCLazyListObject_inplaceRepeat(OOCLazyListObject* self, MDB_txn* txn, unsi
             }
 
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
-            put(txn, self->ooc->listsDb, &mdbDestKey, &mdbValue);
+            put(txn.txn, self->ooc->listsDb, &mdbDestKey, &mdbValue);
             destEncodedListKey.listIndex += 1;
 
             found = cursor_get(cursor, &mdbSourceKey, &mdbValue, MDB_NEXT);
@@ -808,7 +796,7 @@ void OOCLazyListObject_inplaceRepeat(OOCLazyListObject* self, MDB_txn* txn, unsi
     uint32_t newLength = destEncodedListKey.listIndex;
     MDB_val mdbLength = {.mv_size = sizeof(newLength), .mv_data = &newLength};
     destEncodedListKey.listIndex = ListKey::listIndexLength;
-    put(txn, self->ooc->listsDb, &mdbDestKey, &mdbLength);
+    put(txn.txn, self->ooc->listsDb, &mdbDestKey, &mdbLength);
 }
 
 static PyObject* OOCLazyList_append(
@@ -821,14 +809,11 @@ static PyObject* OOCLazyList_append(
     }
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, true);
+        OOCTransaction txn(self->ooc, false);
         OOCLazyListObject_append(self, txn, other);
-        txn_commit(txn);
+        txn.commit();
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
@@ -836,24 +821,25 @@ static PyObject* OOCLazyList_append(
     Py_RETURN_NONE;
 }
 
-void OOCLazyListObject_append(OOCLazyListObject* self, MDB_txn* txn, PyObject* item) {
-    EncodedValue encodedItem;
-    Id2EncodedMap insertedItems;
-    OOCMap_encode(self->ooc, item, &encodedItem, txn, insertedItems);
+void OOCLazyListObject_append(OOCLazyListObject* self, OOCTransaction& txn, PyObject* item) {
+    const EncodedValue* const encodedItem = OOCMap_encode(self->ooc, item, txn);
 
     ListKey selfEncodedListKey = {
         .listIndex = OOCLazyListObject_length(self, txn),
         .listId = self->listId
     };
     MDB_val mdbSelfKey = {.mv_size = sizeof(selfEncodedListKey), .mv_data = &selfEncodedListKey};
-    MDB_val mdbValue = {.mv_size = sizeof(encodedItem), .mv_data = &encodedItem};
-    put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbValue);
+    MDB_val mdbValue = {
+        .mv_size = sizeof(*encodedItem),
+        .mv_data = const_cast<EncodedValue*>(encodedItem)
+    };
+    put(txn.txn, self->ooc->listsDb, &mdbSelfKey, &mdbValue);
 
     // write the new length
     uint32_t newLength = selfEncodedListKey.listIndex + 1;
     MDB_val mdbLength = {.mv_size = sizeof(newLength), .mv_data = &newLength};
     selfEncodedListKey.listIndex = ListKey::listIndexLength;
-    put(txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
+    put(txn.txn, self->ooc->listsDb, &mdbSelfKey, &mdbLength);
 }
 
 PyObject* OOCLazyList_clear(PyObject* const pySelf) {
@@ -863,24 +849,21 @@ PyObject* OOCLazyList_clear(PyObject* const pySelf) {
     }
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, true);
+        OOCTransaction txn(self->ooc, false);
         OOCLazyListObject_clear(self, txn);
-        txn_commit(txn);
+        txn.commit();
         Py_RETURN_NONE;
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
 }
 
-void OOCLazyListObject_clear(OOCLazyListObject* const self, MDB_txn* const txn) {
+void OOCLazyListObject_clear(OOCLazyListObject* const self, OOCTransaction& txn) {
     MDB_cursor* cursor = nullptr;
     try {
-        cursor = cursor_open(txn, self->ooc->listsDb);
+        cursor = cursor_open(txn.txn, self->ooc->listsDb);
 
         ListKey encodedListKey = {
             .listIndex = 0,
@@ -924,15 +907,12 @@ static int OOCLazyList_contains(PyObject* const pySelf, PyObject* const item) {
     }
     OOCLazyListObject* const self = reinterpret_cast<OOCLazyListObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
         const Py_ssize_t index = OOCLazyListObject_index(self, txn, item);
-        txn_commit(txn);
+        txn.commit();
         if(index < 0) return 0; else return 1;
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return -1;
     }
@@ -999,7 +979,8 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             } else {
                 if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
                 EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
-                return OOCMap_decode(ooc, encodedResult, txn);
+                OOCTransaction oocTxn(txn, true);
+                return OOCMap_decode(ooc, encodedResult, oocTxn);
             }
         } catch(const OocError& error) {
             if(self->cursor != nullptr) {
@@ -1038,7 +1019,8 @@ static PyObject* OOCLazyListIter_iternext(PyObject* const pySelf) {
             }
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data);
-            return OOCMap_decode(ooc, encodedResult, txn);
+            OOCTransaction oocTxn(txn, true);
+            return OOCMap_decode(ooc, encodedResult, oocTxn);
         } catch(const OocError& error) {
             cursor_close(self->cursor);
             self->cursor = nullptr;
@@ -1145,11 +1127,9 @@ PyObject* OOCLazyList_richcompare(PyObject* const pySelf, PyObject* const other,
     } else {
         switch(op) {
         case Py_EQ:
-            Py_INCREF(Py_False);
-            return Py_False;
+            Py_RETURN_FALSE;
         case Py_NE:
-            Py_INCREF(Py_True);
-            return Py_True;
+            Py_RETURN_TRUE;
         default:
             PyErr_Format(PyExc_TypeError, "Operation not supported between these types");
             return nullptr;

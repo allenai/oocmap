@@ -2,6 +2,7 @@
 #define OOCMAP_OOCMAP_H
 
 #include <unordered_map>
+#include <vector>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
@@ -92,19 +93,30 @@ namespace std {
 
 
 // Mapping PyObjects to EncodedValues so we can avoid encoding the same value twice.
-typedef std::unordered_map<PyObject*, const EncodedValue*> Id2EncodedMap;
+typedef std::unordered_map<PyObject*, EncodedValue> Id2EncodedMap;
 // Mapping EncodedValues to PyObjects so we can avoid decoding the same value twice.
 typedef std::unordered_map<EncodedValue, PyObject*> Encoded2IdMap;
 
-void OOCMap_encode(
-    OOCMapObject* self,
-    PyObject* value,
-    EncodedValue* dest,
-    MDB_txn* txn,
-    Id2EncodedMap& insertedItemsInThisTransaction,
-    bool readonly = false
-);
-PyObject* OOCMap_decode(OOCMapObject* self, EncodedValue* encodedValue, MDB_txn* txn);
+
+struct OOCTransaction {
+    bool readonly;
+    bool txnOwned;
+    MDB_txn* txn;
+    Id2EncodedMap insertedItems;
+
+    explicit OOCTransaction(OOCMapObject* ooc, bool readonly);
+    explicit OOCTransaction(MDB_txn* txn, bool readonly);
+    ~OOCTransaction();
+
+    void commit();
+    void abort();
+
+private:
+    void clear();
+};
+
+const EncodedValue* OOCMap_encode(OOCMapObject* self, PyObject* value, OOCTransaction& txn);
+PyObject* OOCMap_decode(OOCMapObject* self, EncodedValue* encodedValue, OOCTransaction& txn);
 
 
 const uint8_t TYPE_CODE_HARDCODED = 0;

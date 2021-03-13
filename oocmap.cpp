@@ -14,6 +14,43 @@ static std::mt19937 random_engine(std::chrono::system_clock::now().time_since_ep
 
 const uint32_t ListKey::listIndexLength = std::numeric_limits<uint32_t>::max();
 
+OOCTransaction::OOCTransaction(OOCMapObject* const ooc, const bool readonly) :
+    readonly(readonly),
+    txnOwned(true),
+    txn(txn_begin(ooc->mdb, !readonly))
+{ }
+
+OOCTransaction::OOCTransaction(MDB_txn* const txn, const bool readonly) :
+    readonly(readonly),
+    txnOwned(false),
+    txn(txn)
+{ }
+
+
+OOCTransaction::~OOCTransaction() {
+    if(txnOwned && txn != nullptr)
+        abort();
+    else
+        clear();
+}
+
+void OOCTransaction::clear() {
+    for(const auto& pair : insertedItems) Py_DECREF(pair.first);
+    insertedItems.clear();
+}
+
+void OOCTransaction::commit() {
+    txn_commit(txn);
+    txn = nullptr;
+    clear();
+}
+
+void OOCTransaction::abort() {
+    txn_abort(txn);
+    txn = nullptr;
+    clear();
+}
+
 
 //
 // Functions that are not exposed to Python
@@ -21,41 +58,34 @@ const uint32_t ListKey::listIndexLength = std::numeric_limits<uint32_t>::max();
 //
 
 // hardcoded values
-static const EncodedValue ENCODED_NONE = {.asInt = 0, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
-static const EncodedValue ENCODED_INT_ZERO = {.asInt = 1, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
-static const EncodedValue ENCODED_TRUE = {.asInt = 3, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
-static const EncodedValue ENCODED_FALSE = {.asInt = 4, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
-static const EncodedValue ENCODED_EMPTY_TUPLE = {.asInt = 5, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
-static const EncodedValue ENCODED_EMPTY_STRING = {.asInt = 6, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_UNINITIALIZED = {.asUInt = 0, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0}; // This one has to be all zeros.
+static const EncodedValue ENCODED_NONE = {.asUInt = 1, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_INT_ZERO = {.asUInt = 2, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_TRUE = {.asUInt = 3, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_FALSE = {.asUInt = 4, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_EMPTY_TUPLE = {.asUInt = 5, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_EMPTY_STRING = {.asUInt = 6, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
 
-void OOCMap_encode(
+const EncodedValue* OOCMap_encode(
     OOCMapObject* const self,
     PyObject* const value,
-    EncodedValue* const dest,
-    MDB_txn* const txn,
-    Id2EncodedMap& insertedItemsInThisTransaction,
-    const bool readonly
+    OOCTransaction& txn
     // TODO: failOnMutable flag so we can fail when we use mutable items as dictionary keys
 ) {
     // Python's cell objects
     if(PyCell_Check(value)) {
-        OOCMap_encode(self, PyCell_GET(value), dest, txn, insertedItemsInThisTransaction, readonly);
-        return;
-    }
-
-    // did we already write this object?
-    const EncodedValue*& destInTheMap = insertedItemsInThisTransaction[value];
-    if(destInTheMap != nullptr) {
-        *dest = *destInTheMap;
-        return;
+        return OOCMap_encode(self, PyCell_GET(value), txn);
     }
 
     // Python's None
     if(value == Py_None) {
-        *dest = ENCODED_NONE;
-        destInTheMap = dest;
-        return;
+        return &ENCODED_NONE;
     }
+
+    // did we already write this object?
+    EncodedValue& result = txn.insertedItems[value];
+    Py_INCREF(value);   // insertedItems owns these objects
+    if(result != ENCODED_UNINITIALIZED) return &result;
 
     // TODO: Do this in terms of "protocols", not concrete objects (https://docs.python.org/3/c-api/mapping.html and friends)
     // TODO: maybe? Not sure that's an improvement.
@@ -65,40 +95,37 @@ void OOCMap_encode(
         PyLongObject* longObject = reinterpret_cast<PyLongObject*>(value);
         if(longObject->ob_base.ob_size == 0) {
             // Integer is 0
-            *dest = ENCODED_INT_ZERO;
-            destInTheMap = dest;
-            return;
+            result = ENCODED_INT_ZERO;
+            return &result;
         } else {
             const size_t longBufferSize = sizeof(digit) * abs(longObject->ob_base.ob_size);
-            if(longBufferSize <= sizeof(dest->asChars)) {
+            if(longBufferSize <= sizeof(result.asChars)) {
                 // Integer fits into EncodedValue directly
-                dest->asUInt = 0;
-                memcpy(dest->asChars, longObject->ob_digit, longBufferSize);
-                dest->typeCode =
+                result.asUInt = 0;
+                memcpy(result.asChars, longObject->ob_digit, longBufferSize);
+                result.typeCode =
                     longObject->ob_base.ob_size > 0 ?
                     TYPE_CODE_SHORT_POSITIVE_INT :
                     TYPE_CODE_SHORT_NEGATIVE_INT;
-                dest->lengthMinusOne = longBufferSize - 1;
-                destInTheMap = dest;
-                return;
+                result.lengthMinusOne = longBufferSize - 1;
+                return &result;
             } else {
                 // Integer doesn't fit into EncodedValue, has to be written to the DB
-                dest->typeCode =
+                result.typeCode =
                     longObject->ob_base.ob_size > 0 ?
                     TYPE_CODE_LONG_POSITIVE_INT :
                     TYPE_CODE_LONG_NEGATIVE_INT;
-                dest->lengthMinusOne = 0;
+                result.lengthMinusOne = 0;
 
                 MDB_val mdbValue = { .mv_size = longBufferSize, .mv_data = longObject->ob_digit };
 
-                dest->asUInt = putImmutable(
-                    txn,
+                result.asUInt = putImmutable(
+                    txn.txn,
                     self->intsDb,
                     &mdbValue,
-                    dest->typeCode,
-                    readonly);
-                destInTheMap = dest;
-                return;
+                    result.typeCode,
+                    txn.readonly);
+                return &result;
             }
         }
     }
@@ -106,26 +133,22 @@ void OOCMap_encode(
     // Python's bools
     if(PyBool_Check(value)) {
         if(value == Py_False) {
-            *dest = ENCODED_FALSE;
-            destInTheMap = dest;
-            return;
+            result = ENCODED_FALSE;
+            return &result;
         } else if(value == Py_True) {
-            *dest = ENCODED_TRUE;
-            destInTheMap = dest;
-            return;
+            result = ENCODED_TRUE;
+            return &result;
         } else {
             throw OocError(OocError::InvalidBool);
-            return;
         }
     }
 
     // Python's floats
     if(PyFloat_CheckExact(value)) {
-        dest->asFloat = PyFloat_AS_DOUBLE(value);
-        dest->typeCode = TYPE_CODE_FLOAT;
-        dest->lengthMinusOne = 0;
-        destInTheMap = dest;
-        return;
+        result.asFloat = PyFloat_AS_DOUBLE(value);
+        result.typeCode = TYPE_CODE_FLOAT;
+        result.lengthMinusOne = 0;
+        return &result;
     }
 
     // Python's complex numbers
@@ -144,47 +167,44 @@ void OOCMap_encode(
             throw OocError(OocError::CouldNotReadyString);
         size_t dataSize = PyUnicode_GET_LENGTH(value);
         if(dataSize == 0) {
-            *dest = ENCODED_EMPTY_STRING;
-            destInTheMap = dest;
-            return;
+            result = ENCODED_EMPTY_STRING;
+            return &result;
         } else {
             const int kind = PyUnicode_KIND(value);
             switch(kind) {
             case PyUnicode_WCHAR_KIND:
-                dest->typeCode = TYPE_CODE_UNICODE_SHORT_WCHAR;
+                result.typeCode = TYPE_CODE_UNICODE_SHORT_WCHAR;
                 dataSize *= Py_UNICODE_SIZE;
                 break;
             case PyUnicode_1BYTE_KIND:
-                dest->typeCode = TYPE_CODE_UNICODE_SHORT_1BYTE;
+                result.typeCode = TYPE_CODE_UNICODE_SHORT_1BYTE;
                 dataSize *= sizeof(Py_UCS1);
                 break;
             case PyUnicode_2BYTE_KIND:
-                dest->typeCode = TYPE_CODE_UNICODE_SHORT_2BYTE;
+                result.typeCode = TYPE_CODE_UNICODE_SHORT_2BYTE;
                 dataSize *= sizeof(Py_UCS2);
                 break;
             case PyUnicode_4BYTE_KIND:
-                dest->typeCode = TYPE_CODE_UNICODE_SHORT_4BYTE;
+                result.typeCode = TYPE_CODE_UNICODE_SHORT_4BYTE;
                 dataSize *= sizeof(Py_UCS4);
                 break;
             default:
                 throw OocError(OocError::InvalidStringKind);
             }
 
-            if(dataSize <= sizeof(dest->asChars)) {
+            if(dataSize <= sizeof(result.asChars)) {
                 // String fits into one EncodedValue
-                dest->lengthMinusOne = dataSize - 1;
-                dest->asUInt = 0;
-                memcpy(dest->asChars, PyUnicode_DATA(value), dataSize);
-                destInTheMap = dest;
-                return;
+                result.lengthMinusOne = dataSize - 1;
+                result.asUInt = 0;
+                memcpy(result.asChars, PyUnicode_DATA(value), dataSize);
+                return &result;
             } else {
                 // String does not fit into one EncodedValue, has to be written to DB
-                dest->lengthMinusOne = 0;
-                dest->typeCode += TYPE_CODE_UNICODE_LONG_SHORT_OFFSET;
+                result.lengthMinusOne = 0;
+                result.typeCode += TYPE_CODE_UNICODE_LONG_SHORT_OFFSET;
                 MDB_val mdbValue = {.mv_size = dataSize, .mv_data = PyUnicode_DATA(value)};
-                dest->asUInt = putImmutable(txn, self->stringsDb, &mdbValue, dest->typeCode, readonly);
-                destInTheMap = dest;
-                return;
+                result.asUInt = putImmutable(txn.txn, self->stringsDb, &mdbValue, result.typeCode, txn.readonly);
+                return &result;
             }
         }
     }
@@ -193,90 +213,77 @@ void OOCMap_encode(
     // TODO: this probably doesn't handle namedtuple() correctly
     if(PyTuple_CheckExact(value)) {
         if(PyTuple_GET_SIZE(value) == 0) {
-            *dest = ENCODED_EMPTY_TUPLE;
-            destInTheMap = dest;
-            return;
+            result = ENCODED_EMPTY_TUPLE;
+            return &result;
         } else {
             std::vector<EncodedValue> encodedValues(PyTuple_GET_SIZE(value));
-            // TODO: make sure that there are no alignment issues with this array
             for(
                 Py_ssize_t i = 0; i < PyTuple_GET_SIZE(value); ++i
             ) {
-                OOCMap_encode(
-                    self,
-                    PyTuple_GET_ITEM(value, i),
-                    &encodedValues[i],
-                    txn,
-                    insertedItemsInThisTransaction,
-                    readonly
-                );
+                encodedValues[i] = *OOCMap_encode(self,PyTuple_GET_ITEM(value, i),txn);
             }
 
-            dest->lengthMinusOne = 0;
-            dest->typeCode = TYPE_CODE_TUPLE;
+            result.lengthMinusOne = 0;
+            result.typeCode = TYPE_CODE_TUPLE;
             MDB_val mdbValue = {
                 .mv_size = PyTuple_GET_SIZE(value) * sizeof(EncodedValue),
                 .mv_data = encodedValues.data()
             };
-            dest->asUInt = putImmutable(txn, self->tuplesDb, &mdbValue, dest->typeCode, readonly);
+            result.asUInt = putImmutable(txn.txn, self->tuplesDb, &mdbValue, result.typeCode, txn.readonly);
 
-            destInTheMap = dest;
-            return;
+            return &result;
         }
     }
 
     // Python's list objects
     if(PyList_CheckExact(value)) {
-        dest->typeCode = TYPE_CODE_LIST;
-        dest->asListKey.listIndex = ListKey::listIndexLength;
-        MDB_val mdbKey = { .mv_size = sizeof(dest->asListKey), .mv_data = &dest->asListKey };
+        result.typeCode = TYPE_CODE_LIST;
+        result.asListKey.listIndex = ListKey::listIndexLength;
+        MDB_val mdbKey = { .mv_size = sizeof(result.asListKey), .mv_data = &result.asListKey };
         uint32_t length = Py_SIZE(value);
 
         // find a key
         while(true) {
-            dest->asListKey.listId = random_engine();
+            result.asListKey.listId = random_engine();
             MDB_val mdbValue = { .mv_size = sizeof(uint32_t), .mv_data = &length};
             try {
-                put(txn, self->listsDb, &mdbKey, &mdbValue, MDB_NODUPDATA);
+                put(txn.txn, self->listsDb, &mdbKey, &mdbValue, MDB_NODUPDATA);
             } catch(const MdbError& e) {
-                if(e.mdbErrorCode == MDB_KEYEXIST)
+                if(e.mdbErrorCode == MDB_KEYEXIST) {
                     continue;
-                else
+                } else {
+                    result = ENCODED_UNINITIALIZED;
                     throw;
+                }
             }
             break;
         }
 
-        // We put this into the map now, because the recursive call to _encode() might need it.
-        // Lists can contain themselves after all.
-        destInTheMap = dest;
         try {
             // add the list elements
-            EncodedValue encodedListElement = *dest;
+            EncodedValue encodedListElement = result;
             MDB_val mdbElementKey = {
                 .mv_size = sizeof(encodedListElement.asListKey),
                 .mv_data = &encodedListElement.asListKey
             };
 
             for(Py_ssize_t i = 0; i < PyList_GET_SIZE(value); ++i) {
-                encodedListElement.asListKey.listIndex = i;
-                MDB_val mdbElementValue = {.mv_size = sizeof(EncodedValue), .mv_data = nullptr};
-                put(txn, self->listsDb, &mdbElementKey, &mdbElementValue, MDB_RESERVE);
+                const EncodedValue* const encodedItem = OOCMap_encode(self, PyList_GET_ITEM(value, i), txn);
 
-                OOCMap_encode(
-                    self,
-                    PyList_GET_ITEM(value, i),
-                    reinterpret_cast<EncodedValue*>(mdbElementValue.mv_data),
-                    txn,
-                    insertedItemsInThisTransaction,
-                    readonly);
+                encodedListElement.asListKey.listIndex = i;
+                MDB_val mdbElementValue = {
+                    .mv_size = sizeof(EncodedValue),
+                    .mv_data = const_cast<EncodedValue*>(encodedItem)
+                };
+                put(txn.txn, self->listsDb, &mdbElementKey, &mdbElementValue);
             }
         } catch(...) {
-            insertedItemsInThisTransaction.erase(value);
+            // We already filled in `result` above, so we need to explicitly clear it now.
+            result = ENCODED_UNINITIALIZED;
             throw;
         }
 
-        return;
+        return &result;
     }
 
     // Python's dict objects
@@ -295,22 +302,23 @@ void OOCMap_encode(
         while(true) {
             dictId = random_engine();
             try {
-                put(txn, self->dictsDb, &mdbKey, &mdbValue, MDB_NODUPDATA);
+                put(txn.txn, self->dictsDb, &mdbKey, &mdbValue, MDB_NODUPDATA);
             } catch(const MdbError& e) {
-                if(e.mdbErrorCode == MDB_KEYEXIST)
+                if(e.mdbErrorCode == MDB_KEYEXIST) {
                     continue;
-                else
+                } else {
+                    result = ENCODED_UNINITIALIZED;
                     throw;
+                }
             }
             break;
         }
 
         // We put this into the map now, because the recursive call to _encode() might need it.
         // Dicts can contain themselves after all.
-        dest->asDictKey.dictId = dictId;
-        dest->asDictKey.reserved = 0;
-        dest->typeCode = TYPE_CODE_DICT;
-        destInTheMap = dest;
+        result.asDictKey.dictId = dictId;
+        result.asDictKey.reserved = 0;
+        result.typeCode = TYPE_CODE_DICT;
         try {
             // insert the items
             PyObject* pyKey;
@@ -319,35 +327,26 @@ void OOCMap_encode(
             DictItemKey dictItemKey = { .dictId = dictId };
             while(PyDict_Next(value, &pos, &pyKey, &pyValue)) {
                 // write the PyDict key, filling in the value we need for the mdb key
-                OOCMap_encode(
-                    self,
-                    pyKey,
-                    &dictItemKey.key,
-                    txn,
-                    insertedItemsInThisTransaction,
-                    readonly);
+                dictItemKey.key = *OOCMap_encode(self, pyKey,txn);
 
                 // write the PyDict value
-                EncodedValue encodedValue;
-                OOCMap_encode(
-                    self,
-                    pyValue,
-                    &encodedValue,
-                    txn,
-                    insertedItemsInThisTransaction,
-                    readonly);
+                const EncodedValue* const encodedValue = OOCMap_encode(self, pyValue, txn);
 
                 // Write the mdb key/value.
                 MDB_val mdbDictItemKey = {.mv_size = sizeof(dictItemKey), .mv_data = &dictItemKey};
-                MDB_val mdbDictItemValue = {.mv_size = sizeof(encodedValue), .mv_data = &encodedValue};
-                put(txn, self->dictsDb, &mdbDictItemKey, &mdbDictItemValue);
+                MDB_val mdbDictItemValue = {
+                    .mv_size = sizeof(*encodedValue),
+                    .mv_data = const_cast<EncodedValue*>(encodedValue)
+                };
+                put(txn.txn, self->dictsDb, &mdbDictItemKey, &mdbDictItemValue);
             }
         } catch(...) {
-            insertedItemsInThisTransaction.erase(value);
+            // We already filled in `result` above, so we need to clear it now.
+            result = ENCODED_UNINITIALIZED;
             throw;
         }
 
-        return;
+        return &result;
     }
 
     // Python's set objects
@@ -357,25 +356,23 @@ void OOCMap_encode(
     if(value->ob_type == &OOCLazyTupleType) {
         OOCLazyTupleObject* const tupleValue = reinterpret_cast<OOCLazyTupleObject*>(value);
         if(tupleValue->ooc == self) {
-            dest->asUInt = tupleValue->tupleId;
-            dest->typeCode = TYPE_CODE_TUPLE;
-            dest->lengthMinusOne = 0;
-            destInTheMap = dest;
-            return;
+            result.asUInt = tupleValue->tupleId;
+            result.typeCode = TYPE_CODE_TUPLE;
+            result.lengthMinusOne = 0;
+            return &result;
         } else {
-            MDB_txn* otherTxn = txn_begin(tupleValue->ooc->mdb);
-            PyObject* eager;
+            OOCTransaction otherTxn(tupleValue->ooc, true);
+            PyObject* const eager = OOCLazyTupleObject_eager(tupleValue, otherTxn);
             try {
-                eager = OOCLazyTupleObject_eager(tupleValue, otherTxn);
-                txn_commit(otherTxn);
+                txn.commit();
+                const EncodedValue* const encoded = OOCMap_encode(self, eager, txn);
+                Py_DECREF(eager);
+                result = *encoded;
             } catch(...) {
-                txn_abort(otherTxn);
+                Py_DECREF(eager);
                 throw;
             }
-            OOCMap_encode(self, eager, dest, txn, insertedItemsInThisTransaction, readonly);
-            destInTheMap = dest;
-            Py_DECREF(eager);
-            return;
+            return &result;
         }
     }
 
@@ -383,26 +380,25 @@ void OOCMap_encode(
     if(value->ob_type == &OOCLazyListType) {
         OOCLazyListObject* const listValue = reinterpret_cast<OOCLazyListObject*>(value);
         if(listValue->ooc == self) {
-            dest->asListKey.listId = listValue->listId;
-            dest->asListKey.listIndex = std::numeric_limits<uint32_t>::max();
-            dest->typeCode = TYPE_CODE_LIST;
-            dest->lengthMinusOne = 0;
-            destInTheMap = dest;
-            return;
+            result.asListKey.listId = listValue->listId;
+            result.asListKey.listIndex = std::numeric_limits<uint32_t>::max();
+            result.typeCode = TYPE_CODE_LIST;
+            result.lengthMinusOne = 0;
+            return &result;
         } else {
-            MDB_txn* otherTxn = txn_begin(listValue->ooc->mdb);
-            PyObject* eager;
+            OOCTransaction otherTxn(listValue->ooc, true);
+            PyObject* const eager = OOCLazyListObject_eager(listValue, otherTxn);
             try {
-                eager = OOCLazyListObject_eager(listValue, otherTxn);
-                txn_commit(otherTxn);
+                otherTxn.commit();
+                const EncodedValue* const encoded = OOCMap_encode(self, eager, txn);
+                Py_DECREF(eager);
+                result = *encoded;
             } catch(...) {
-                txn_abort(otherTxn);
+                Py_DECREF(eager);
                 throw;
             }
-            OOCMap_encode(self, eager, dest, txn, insertedItemsInThisTransaction, readonly);
-            destInTheMap = dest;
-            Py_DECREF(eager);
-            return;
+
+            return &result;
         }
     }
 
@@ -410,26 +406,24 @@ void OOCMap_encode(
     if(value->ob_type == &OOCLazyDictType) {
         OOCLazyDictObject* const dictValue = reinterpret_cast<OOCLazyDictObject*>(value);
         if(dictValue->ooc == self) {
-            dest->asDictKey.dictId = dictValue->dictId;
-            dest->asDictKey.reserved = 0;
-            dest->typeCode = TYPE_CODE_DICT;
-            dest->lengthMinusOne = 0;
-            destInTheMap = dest;
-            return;
+            result.asDictKey.dictId = dictValue->dictId;
+            result.asDictKey.reserved = 0;
+            result.typeCode = TYPE_CODE_DICT;
+            result.lengthMinusOne = 0;
+            return &result;
         } else {
-            MDB_txn* otherTxn = txn_begin(dictValue->ooc->mdb);
-            PyObject* eager;
+            OOCTransaction otherTxn(dictValue->ooc, true);
+            PyObject* const eager = OOCLazyDictObject_eager(dictValue, otherTxn);
             try {
-                eager = OOCLazyDictObject_eager(dictValue, otherTxn);
-                txn_commit(otherTxn);
+                otherTxn.commit();
+                const EncodedValue* const encoded = OOCMap_encode(self, eager, txn);
+                Py_DECREF(eager);
+                result = *encoded;
             } catch(...) {
-                txn_abort(otherTxn);
+                Py_DECREF(eager);
                 throw;
             }
-            OOCMap_encode(self, eager, dest, txn, insertedItemsInThisTransaction, readonly);
-            destInTheMap = dest;
-            Py_DECREF(eager);
-            return;
+            return &result;
         }
     }
 
@@ -439,7 +433,7 @@ void OOCMap_encode(
 PyObject* OOCMap_decode(
     OOCMapObject* const self,
     EncodedValue* const encodedValue,
-    MDB_txn* const txn
+    OOCTransaction& txn
     // We don't need a cache of objects we have decoded. Because of lazyness, we only ever decode
     // one object at a time.
 ) {
@@ -447,18 +441,15 @@ PyObject* OOCMap_decode(
     case TYPE_CODE_HARDCODED: {
         PyObject* result = nullptr;
         switch(encodedValue->asInt) {
-        case 0:
-            Py_INCREF(Py_None);
-            return Py_None;
         case 1:
+            Py_RETURN_NONE;
+        case 2:
             result = PyLong_FromLong(0);
             break;
         case 3:
-            Py_INCREF(Py_True);
-            return Py_True;
+            Py_RETURN_TRUE;
         case 4:
-            Py_INCREF(Py_False);
-            return Py_False;
+            Py_RETURN_FALSE;
         case 5:
             result = PyTuple_New(0);
             break;
@@ -487,7 +478,7 @@ PyObject* OOCMap_decode(
     case TYPE_CODE_LONG_NEGATIVE_INT: {
         MDB_val mdbKey = { .mv_size = sizeof(encodedValue->asUInt), .mv_data = &(encodedValue->asUInt) };
         MDB_val mdbValue;
-        const bool found = get(txn, self->intsDb, &mdbKey, &mdbValue);
+        const bool found = get(txn.txn, self->intsDb, &mdbKey, &mdbValue);
         if(!found) throw OocError(OocError::UnexpectedData);
 
         PyLongObject* const result = _PyLong_New(mdbValue.mv_size / sizeof(digit));
@@ -538,7 +529,7 @@ PyObject* OOCMap_decode(
     case TYPE_CODE_UNICODE_LONG_4BYTE: {
         MDB_val mdbKey = {.mv_size = sizeof(encodedValue->asUInt), .mv_data = &(encodedValue->asUInt)};
         MDB_val mdbValue;
-        const bool found = get(txn, self->stringsDb, &mdbKey, &mdbValue);
+        const bool found = get(txn.txn, self->stringsDb, &mdbKey, &mdbValue);
         if(!found) throw OocError(OocError::UnexpectedData);
 
         Py_ssize_t size = mdbValue.mv_size;
@@ -699,30 +690,30 @@ static int OOCMap_insert(PyObject* pySelf, PyObject* key, PyObject* value) {
     OOCMapObject* self = reinterpret_cast<OOCMapObject*>(pySelf);
 
     // start transaction
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->mdb, true);
-        Id2EncodedMap insertedItemsInThisTransaction;
+        OOCTransaction txn(self, false);
 
-        EncodedValue encodedKey;
-        OOCMap_encode(self, key, &encodedKey, txn, insertedItemsInThisTransaction);
-        MDB_val mdbKey = { .mv_size=sizeof(encodedKey), .mv_data=&encodedKey };
+        const EncodedValue* const encodedKey = OOCMap_encode(self, key, txn);
+        MDB_val mdbKey = {
+            .mv_size = sizeof(*encodedKey),
+            .mv_data = const_cast<EncodedValue*>(encodedKey)
+        };
 
         if(value == nullptr) {
             // Deleting the value
-            del(txn, self->rootDb, &mdbKey);
+            del(txn.txn, self->rootDb, &mdbKey);
         } else {
             // Inserting a new value
-            EncodedValue encodedValue;
-            OOCMap_encode(self, value, &encodedValue, txn, insertedItemsInThisTransaction);
-            MDB_val mdbValue = { .mv_size=sizeof(encodedValue), .mv_data=&encodedValue };
+            const EncodedValue* const encodedValue = OOCMap_encode(self, value, txn);
+            MDB_val mdbValue = {
+                .mv_size = sizeof(*encodedValue),
+                .mv_data = const_cast<EncodedValue*>(encodedValue)
+            };
 
-            put(txn, self->rootDb, &mdbKey, &mdbValue);
+            put(txn.txn, self->rootDb, &mdbKey, &mdbValue);
         }
-        txn_commit(txn);
+        txn.commit();
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return -1;
     }
@@ -738,31 +729,29 @@ static PyObject* OOCMap_get(PyObject* pySelf, PyObject* key) {
     }
     OOCMapObject* self = reinterpret_cast<OOCMapObject*>(pySelf);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->mdb, false);
-        Id2EncodedMap insertedItemsInThisTransaction;
+        OOCTransaction txn(self, true);
 
-        EncodedValue encodedKey;
-        OOCMap_encode(self, key, &encodedKey, txn, insertedItemsInThisTransaction, true);
-        MDB_val mdbKey = {.mv_size=sizeof(encodedKey), .mv_data=&encodedKey};
+        const EncodedValue* const encodedKey = OOCMap_encode(self, key, txn);
+        MDB_val mdbKey = {
+            .mv_size = sizeof(*encodedKey),
+            .mv_data = const_cast<EncodedValue*>(encodedKey)
+        };
 
         MDB_val mdbValue;
-        const bool found = get(txn, self->rootDb, &mdbKey, &mdbValue);
+        const bool found = get(txn.txn, self->rootDb, &mdbKey, &mdbValue);
         if(found) {
             if(mdbValue.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
             EncodedValue* encodedValue = static_cast<EncodedValue*>(mdbValue.mv_data);
 
             PyObject* const result = OOCMap_decode(self, encodedValue, txn);
-            txn_commit(txn);
+            txn.commit();
             return result;
         } else {
-            txn_abort(txn);
             PyErr_SetObject(PyExc_KeyError, key);
             return nullptr;
         }
     } catch(const OocError& error) {
-        if(txn != nullptr) txn_abort(txn);
         if(error.errorCode == OocError::ImmutableValueNotFound)
             PyErr_SetObject(PyExc_KeyError, key);
         else

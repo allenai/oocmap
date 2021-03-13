@@ -18,7 +18,7 @@ extern PyTypeObject OOCLazyTupleType;
 
 OOCLazyTupleObject* OOCLazyTuple_fastnew(OOCMapObject* ooc, uint64_t tupleId);
 
-PyObject* OOCLazyTupleObject_eager(OOCLazyTupleObject* self, MDB_txn* txn);
+PyObject* OOCLazyTupleObject_eager(OOCLazyTupleObject* self, OOCTransaction& txn);
 PyObject* OOCLazyTuple_eager(PyObject* pySelf);
 
 #endif

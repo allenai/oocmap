@@ -21,9 +21,8 @@ extern PyTypeObject OOCLazyDictType;
 
 OOCLazyDictObject* OOCLazyDict_fastnew(OOCMapObject* ooc, uint32_t dictId);
 
-Py_ssize_t OOCLazyDictObject_length(OOCLazyDictObject* self, MDB_txn* txn);
-
-PyObject* OOCLazyDictObject_eager(OOCLazyDictObject* self, MDB_txn* txn);
+Py_ssize_t OOCLazyDictObject_length(OOCLazyDictObject* self, OOCTransaction& txn);
+PyObject* OOCLazyDictObject_eager(OOCLazyDictObject* self, OOCTransaction& txn);
 PyObject* OOCLazyDict_eager(PyObject* pySelf);
 
 

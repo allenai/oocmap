@@ -4,7 +4,7 @@
 #include <cstdint>
 #include "lmdb.h"
 
-MDB_txn* txn_begin(MDB_env* mdb, bool write = false);
+MDB_txn* txn_begin(MDB_env* mdb, bool write);
 void txn_commit(MDB_txn* txn);
 void txn_abort(MDB_txn* txn);
 void open_db(MDB_txn* txn, const char* name, unsigned int flags, MDB_dbi* dbi);

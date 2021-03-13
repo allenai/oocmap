@@ -20,7 +20,7 @@ OOCLazyTupleObject* OOCLazyTuple_fastnew(OOCMapObject* const ooc, const uint64_t
     return self;
 }
 
-PyObject* OOCLazyTupleObject_eager(OOCLazyTupleObject* const self, MDB_txn* const txn) {
+PyObject* OOCLazyTupleObject_eager(OOCLazyTupleObject* const self, OOCTransaction& txn) {
     if(self->eager != nullptr) {
         Py_INCREF(self->eager);
         return self->eager;
@@ -28,7 +28,7 @@ PyObject* OOCLazyTupleObject_eager(OOCLazyTupleObject* const self, MDB_txn* cons
 
     MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };
     MDB_val mdbValue;
-    const bool found = get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+    const bool found = get(txn.txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
     if(!found) throw OocError(OocError::UnexpectedData);
     const Py_ssize_t size = mdbValue.mv_size / sizeof(EncodedValue);
     PyObject* const result = PyTuple_New(size);
@@ -36,7 +36,7 @@ PyObject* OOCLazyTupleObject_eager(OOCLazyTupleObject* const self, MDB_txn* cons
     EncodedValue* const encodedResults = static_cast<EncodedValue* const>(mdbValue.mv_data);
     for(Py_ssize_t i = 0; i < size; ++i)
         PyTuple_SET_ITEM(result, i, OOCMap_decode(self->ooc, encodedResults + i, txn));
-    txn_commit(txn);
+    txn.commit();
     self->eager = result;
     Py_INCREF(result);
     return result;
@@ -125,22 +125,19 @@ static PyObject* OOCLazyTuple_item(PyObject* const pySelf, Py_ssize_t const inde
     if(self->eager != nullptr)
         return PyTuple_GET_ITEM(self->eager, index);
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
         MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };
         MDB_val mdbValue;
-        const bool found = get(txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+        const bool found = get(txn.txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
         if(!found) throw OocError(OocError::UnexpectedData);
         if(index < 0 || index > static_cast<Py_ssize_t>(mdbValue.mv_size / sizeof(EncodedValue)))
             throw OocError(OocError::IndexError);
         EncodedValue* const encodedResult = static_cast<EncodedValue* const>(mdbValue.mv_data) + index;
         PyObject* const result = OOCMap_decode(self->ooc, encodedResult, txn);
-        txn_commit(txn);
+        txn.commit();
         return result;
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
@@ -158,13 +155,10 @@ PyObject* OOCLazyTuple_eager(PyObject* const pySelf) {
         return self->eager;
     }
 
-    MDB_txn* txn = nullptr;
     try {
-        txn = txn_begin(self->ooc->mdb, false);
+        OOCTransaction txn(self->ooc, true);
         return OOCLazyTupleObject_eager(self, txn);
     } catch(const OocError& error) {
-        if(txn != nullptr)
-            txn_abort(txn);
         error.pythonize();
         return nullptr;
     }
