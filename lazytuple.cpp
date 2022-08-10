@@ -298,18 +298,89 @@ Py_ssize_t OOCLazyTupleObject_index(
     return -1;
 }
 
+static PyObject* OOCLazyTuple_count(
+    PyObject* const pySelf,
+    PyObject* const value
+) {
+    if(pySelf->ob_type != &OOCLazyTupleType) {
+        PyErr_BadArgument();
+        return nullptr;
+    }
+    OOCLazyTupleObject* const self = reinterpret_cast<OOCLazyTupleObject*>(pySelf);
+
+    Py_ssize_t count;
+    try {
+        OOCTransaction txn(self->ooc, true);
+        count = OOCLazyTupleObject_count(self, txn, value);
+        txn.commit();
+    } catch(const OocError& error) {
+        error.pythonize();
+        return nullptr;
+    }
+
+    return PyLong_FromSsize_t(count);
+}
+
+Py_ssize_t OOCLazyTupleObject_count(OOCLazyTupleObject* self, OOCTransaction& txn, PyObject* value) {
+    Id2EncodedMap insertedItemsInThisTransaction;
+    const EncodedValue* encodedValue = nullptr;
+    try {
+        const bool oldReadonly = txn.readonly;
+        txn.readonly = true;
+        encodedValue = OOCMap_encode(self->ooc, value, txn);
+        txn.readonly = oldReadonly;
+    } catch(const MdbError& e) {
+        if(e.mdbErrorCode != EACCES) throw;
+        // TODO: This does not really work, because it relies on txn really being readonly, whereas
+        // we might just be faking it.
+
+        // We tried to write the value in a readonly transaction, so we got the EACCES error. This must
+        // mean the value is a mutable value. The only thing we can do is search linearly through the list.
+    } catch(const OocError& e) {
+        if(e.errorCode != OocError::ImmutableValueNotFound) throw;
+        // Needle is immutable but not inserted into the map, so we know for sure we won't find it.
+        return 0;
+    }
+
+    MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };
+    MDB_val mdbValue;
+    const bool found = get(txn.txn, self->ooc->tuplesDb, &mdbKey, &mdbValue);
+    if(!found) throw OocError(OocError::UnexpectedData);
+    const Py_ssize_t length = mdbValue.mv_size / sizeof(EncodedValue);
+    EncodedValue* const encodedResults = static_cast<EncodedValue* const>(mdbValue.mv_data);
+
+    Py_ssize_t result = 0;
+    for(Py_ssize_t i = 0; i < length; ++i) {
+        EncodedValue* const encodedItem = encodedResults + i;
+        if(encodedValue == nullptr) {
+            PyObject* const item = OOCMap_decode(self->ooc, encodedItem, txn);
+            if(PyObject_RichCompareBool(value, item, Py_EQ))
+                result += 1;
+        } else {
+            if(*encodedValue == *encodedItem)
+                result += 1;
+        }
+    }
+    return result;
+}
+
 static PyMethodDef OOCLazyTuple_methods[] = {
     {
         "eager",
         (PyCFunction)OOCLazyTuple_eager,
         METH_NOARGS,
         PyDoc_STR("returns the original tuple")
-    },{
+    }, {
         "index",
         (PyCFunction)OOCLazyTuple_index,
         METH_FASTCALL,
         PyDoc_STR("returns the index of the given item in the tuple")
-    },{nullptr}, // sentinel
+    }, {
+        "count",
+        (PyCFunction)OOCLazyTuple_count,
+        METH_O,
+        PyDoc_STR("counts how often an item appears in the tuple")
+    }, {nullptr}, // sentinel
 };
 
 static PySequenceMethods OOCLazyTuple_sequence_methods = {

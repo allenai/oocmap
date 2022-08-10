@@ -31,4 +31,6 @@ Py_ssize_t OOCLazyTupleObject_index(
     Py_ssize_t stop = 9223372036854775807
 );
 
+Py_ssize_t OOCLazyTupleObject_count(OOCLazyTupleObject* self, OOCTransaction& txn, PyObject* value);
+
 #endif
