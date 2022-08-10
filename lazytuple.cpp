@@ -364,6 +364,30 @@ Py_ssize_t OOCLazyTupleObject_count(OOCLazyTupleObject* self, OOCTransaction& tx
     return result;
 }
 
+PyObject* OOCLazyTuple_concat(PyObject* pySelf, PyObject* pyOther) {
+    PyObject* selfEager = nullptr;
+    if(pySelf->ob_type == &OOCLazyTupleType) {
+        selfEager = OOCLazyTuple_eager(pySelf);
+        pySelf = selfEager;
+    }
+
+    PyObject* otherEager = nullptr;
+    if(pyOther->ob_type == &OOCLazyTupleType) {
+        otherEager = OOCLazyTuple_eager(pyOther);
+        pyOther = otherEager;
+    }
+
+    PyObject* result = nullptr;
+    if(pySelf != nullptr && pyOther != nullptr)
+        result = PySequence_Concat(pySelf, pyOther);
+    if(selfEager != nullptr)
+        Py_DECREF(selfEager);
+    if(otherEager != nullptr)
+        Py_DECREF(otherEager);
+
+    return result;
+}
+
 static PyMethodDef OOCLazyTuple_methods[] = {
     {
         "eager",
@@ -385,10 +409,14 @@ static PyMethodDef OOCLazyTuple_methods[] = {
 
 static PySequenceMethods OOCLazyTuple_sequence_methods = {
     .sq_length = OOCLazyTuple_length,
-    .sq_concat = nullptr, // TODO OOCLazyTuple_concat,
+    .sq_concat = OOCLazyTuple_concat,
     .sq_repeat = nullptr, // TODO OOCLazyTuple_repeat,
     .sq_item = OOCLazyTuple_item,
     .sq_contains = nullptr, // TODO OOCLazyTuple_contains
+};
+
+static PyNumberMethods  OOCLazyTuple_number_methods = {
+    .nb_add = OOCLazyTuple_concat,
 };
 
 PyTypeObject OOCLazyTupleType = {
@@ -397,6 +425,7 @@ PyTypeObject OOCLazyTupleType = {
     .tp_basicsize = sizeof(OOCLazyTupleObject),
     .tp_itemsize = 0,
     .tp_dealloc = (destructor)OOCLazyTuple_dealloc,
+    .tp_as_number = &OOCLazyTuple_number_methods,
     .tp_as_sequence = &OOCLazyTuple_sequence_methods,
     .tp_hash = OOCLazyTuple_hash,
     .tp_flags = Py_TPFLAGS_DEFAULT,
