@@ -412,7 +412,6 @@ static PySequenceMethods OOCLazyTuple_sequence_methods = {
     .sq_concat = OOCLazyTuple_concat,
     .sq_repeat = nullptr, // TODO OOCLazyTuple_repeat,
     .sq_item = OOCLazyTuple_item,
-    .sq_contains = nullptr, // TODO OOCLazyTuple_contains
 };
 
 static PyNumberMethods  OOCLazyTuple_number_methods = {
