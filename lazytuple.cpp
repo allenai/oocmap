@@ -388,6 +388,14 @@ PyObject* OOCLazyTuple_concat(PyObject* pySelf, PyObject* pyOther) {
     return result;
 }
 
+PyObject* OOCLazyTuple_repeat(PyObject* const pySelf, const Py_ssize_t count) {
+    PyObject* const eager = OOCLazyTuple_eager(pySelf);
+    if(eager == nullptr) return nullptr;
+    PyObject* const result = PySequence_Repeat(eager, count);
+    Py_DECREF(eager);
+    return result;
+}
+
 static PyMethodDef OOCLazyTuple_methods[] = {
     {
         "eager",
@@ -410,7 +418,7 @@ static PyMethodDef OOCLazyTuple_methods[] = {
 static PySequenceMethods OOCLazyTuple_sequence_methods = {
     .sq_length = OOCLazyTuple_length,
     .sq_concat = OOCLazyTuple_concat,
-    .sq_repeat = nullptr, // TODO OOCLazyTuple_repeat,
+    .sq_repeat = OOCLazyTuple_repeat,
     .sq_item = OOCLazyTuple_item,
 };
 

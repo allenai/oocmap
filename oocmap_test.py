@@ -250,6 +250,15 @@ def test_oocmap_tuple():
         assert m[999] + m[0] == ("Paul", "Ringo", "George", "John Winston Ono Lennon") + t
         assert m[0] + m[999] == t + ("Paul", "Ringo", "George", "John Winston Ono Lennon")
 
+        # LazyTuple.__mul__()
+        for count in [-1, 0, 1, 3]:
+            assert_equal_including_exceptions(
+                lambda: t * count,
+                lambda: m[0] * count)
+            assert_equal_including_exceptions(
+                lambda: count * t,
+                lambda: count * m[0])
+
 
 def test_oocmap_dict():
     with tempfile.NamedTemporaryFile() as f:
