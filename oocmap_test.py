@@ -201,7 +201,7 @@ def test_oocmap_tuple():
         t = (1, 2.0, "three", m[999])
         m[0] = t
         assert t == m[0]
-        assert m[0] == t # not the same thing
+        assert m[0] == t  # not the same thing
 
         # LazyTuple.__len__()
         assert len(t) == len(m[0])
