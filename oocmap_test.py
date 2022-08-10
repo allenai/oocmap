@@ -100,10 +100,9 @@ def test_oocmap_list():
             assert_equal_including_exceptions(
                 lambda: l + item,
                 lambda: m[0] + item)
-            # I don't know how to make the following work in Python.
-            #assert_equal_including_exceptions(
-            #    lambda: [item] + l,
-            #    lambda: [item] + m[0])
+            assert_equal_including_exceptions(
+                lambda: [item] + l,
+                lambda: [item] + m[0])
 
         # LazyList.__contains__()
         for item in l + ["notfound"]:

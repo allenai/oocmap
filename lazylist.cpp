@@ -918,11 +918,27 @@ static int OOCLazyList_contains(PyObject* const pySelf, PyObject* const item) {
     }
 }
 
-PyObject* OOCLazyList_concat(PyObject* const pySelf, PyObject* const pyOther) {
-    PyObject* const eager = OOCLazyList_eager(pySelf);
-    if(eager == nullptr) return nullptr;
-    PyObject* const result = PySequence_Concat(eager, pyOther);
-    Py_DECREF(eager);
+PyObject* OOCLazyList_concat(PyObject* pySelf, PyObject* pyOther) {
+    PyObject* selfEager = nullptr;
+    if(pySelf->ob_type == &OOCLazyListType) {
+        selfEager = OOCLazyList_eager(pySelf);
+        pySelf = selfEager;
+    }
+
+    PyObject* otherEager = nullptr;
+    if(pyOther->ob_type == &OOCLazyListType) {
+        otherEager = OOCLazyList_eager(pyOther);
+        pyOther = otherEager;
+    }
+
+    PyObject* result = nullptr;
+    if(pySelf != nullptr && pyOther != nullptr)
+        result = PySequence_Concat(pySelf, pyOther);
+    if(selfEager != nullptr)
+        Py_DECREF(selfEager);
+    if(otherEager != nullptr)
+        Py_DECREF(otherEager);
+
     return result;
 }
 
@@ -1184,12 +1200,17 @@ static PySequenceMethods OOCLazyList_sequence_methods = {
     .sq_inplace_repeat = OOCLazyList_inplaceRepeat
 };
 
+static PyNumberMethods OOCLazyList_number_methods = {
+    .nb_add = OOCLazyList_concat
+};
+
 PyTypeObject OOCLazyListType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     .tp_name = "oocmap.LazyList",
     .tp_basicsize = sizeof(OOCLazyListObject),
     .tp_itemsize = 0,
     .tp_dealloc = (destructor)OOCLazyList_dealloc,
+    .tp_as_number = &OOCLazyList_number_methods,
     .tp_as_sequence = &OOCLazyList_sequence_methods,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_doc = "A list-like class that's backed by an OOCMap",
