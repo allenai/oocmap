@@ -135,6 +135,9 @@ def test_oocmap_list():
             assert_equal_including_exceptions(
                 lambda: l * count,
                 lambda: m[0] * count)
+            assert_equal_including_exceptions(
+                lambda: count * l,
+                lambda: count * m[0])
 
         # LazyList.append()
         m[0].append(4)
