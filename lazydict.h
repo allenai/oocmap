@@ -37,7 +37,7 @@ typedef struct {
 
 extern PyTypeObject OOCLazyDictItemsType;
 
-OOCLazyDictItemsObject* OOCLazyDictItems_fastnew(OOCMapObject* ooc, uint32_t dictId);
+OOCLazyDictItemsObject* OOCLazyDictItems_fastnew(OOCLazyDictObject* dict);
 
 
 //
@@ -52,7 +52,7 @@ typedef struct {
 
 extern PyTypeObject OOCLazyDictItemsIterType;
 
-OOCLazyDictItemsIterObject* OOCLazyDictItemsIter_fastnew(OOCMapObject* ooc, uint32_t dictId);
+OOCLazyDictItemsIterObject* OOCLazyDictItemsIter_fastnew(OOCLazyDictObject* dict);
 
 
 //
