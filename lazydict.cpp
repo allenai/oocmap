@@ -146,7 +146,7 @@ static int OOCLazyDictItemsIter_init(OOCLazyDictItemsIterObject* const self, PyO
     const int parseSuccess = PyArg_ParseTupleAndKeywords(
         args,
         kwds,
-        "O",
+        "O!",
         const_cast<char**>(kwlist),
         &OOCLazyDictType, &dictObject);
     if(!parseSuccess)
