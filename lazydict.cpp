@@ -218,14 +218,44 @@ static int OOCLazyDict_insert(PyObject* pySelf, PyObject* key, PyObject* value) 
                 throw;
             }
         }
-        const EncodedValue* const encodedValue = OOCMap_encode(self->ooc, key, txn);
 
         MDB_val mdbKey = { .mv_size = sizeof(encodedKey), .mv_data = &encodedKey };
-        MDB_val mdbValue = {
-            .mv_size = sizeof(*encodedValue),
-            .mv_data = const_cast<EncodedValue*>(encodedValue)
-        };
-        put(txn.txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
+        MDB_val mdbValueRead;
+
+        Py_ssize_t lengthChange = 0;
+        if(value == nullptr) {
+            try {
+                del(txn.txn, self->ooc->dictsDb, &mdbKey);
+                lengthChange -= 1;
+            } catch(const MdbError& error) {
+                if(error.mdbErrorCode != MDB_NOTFOUND)
+                    throw;
+            }
+        } else {
+            const bool found = get(txn.txn, self->ooc->dictsDb, &mdbKey, &mdbValueRead);
+            const EncodedValue* const encodedValue = OOCMap_encode(self->ooc, value, txn);
+            MDB_val mdbValue = {
+                .mv_size = sizeof(*encodedValue),
+                .mv_data = const_cast<EncodedValue*>(encodedValue)
+            };
+
+            if(found) {
+                if(mdbValueRead.mv_size != sizeof(EncodedValue)) throw OocError(OocError::UnexpectedData);
+                const EncodedValue* const encodedValueRead = static_cast<EncodedValue* const>(mdbValueRead.mv_data);
+                if(*encodedValue != *encodedValueRead)
+                    put(txn.txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
+            } else {
+                put(txn.txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
+                lengthChange += 1;
+            }
+        }
+
+        if(lengthChange != 0) {
+            Py_ssize_t length = OOCLazyDictObject_length(self, txn) + lengthChange;
+            MDB_val mdbLengthKey = {.mv_size = sizeof(self->dictId), .mv_data = &self->dictId};
+            MDB_val mdbLengthValue = {.mv_size = sizeof(length), .mv_data = &length};
+            put(txn.txn, self->ooc->dictsDb, &mdbLengthKey, &mdbLengthValue);
+        }
 
         txn.commit();
     } catch(const OocError& error) {
