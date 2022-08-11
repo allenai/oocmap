@@ -484,6 +484,41 @@ static PyObject* OOCLazyDictItemsIter_iternext(PyObject* const pySelf) {
     return result;
 }
 
+static int OOCLazyDict_contains(PyObject* const pySelf, PyObject* const item) {
+    if(pySelf->ob_type != &OOCLazyDictType) {
+        PyErr_BadArgument();
+        return -1;
+    }
+    OOCLazyDictObject* const self = reinterpret_cast<OOCLazyDictObject*>(pySelf);
+
+    try {
+        OOCTransaction txn(self->ooc, true);
+
+        DictItemKey encodedItemKey = { .dictId = self->dictId };
+        try {
+            encodedItemKey.key = *OOCMap_encode(self->ooc, item, txn, true, true);
+        } catch(const OocError& error) {
+            switch(error.errorCode) {
+            case OocError::ImmutableValueNotFound:
+            case OocError::WriteNotAllowed:
+                return 0;
+            case OocError::MutableValueNotAllowed:
+                PyErr_Format(PyExc_TypeError, "unhashable type: '%s'", Py_TYPE(item)->tp_name);
+                return -1;
+            default:
+                throw;
+            }
+        }
+
+        MDB_val mdbKey = { .mv_size = sizeof(encodedItemKey), .mv_data = &encodedItemKey };
+        MDB_val mdbValue;
+        const bool found = get(txn.txn, self->ooc->dictsDb, &mdbKey, &mdbValue);
+        return found ? 1 : 0;
+    } catch(const OocError& error) {
+        error.pythonize();
+        return -1;
+    }
+}
 
 static PyMethodDef OOCLazyDict_methods[] = {
     {
@@ -506,12 +541,18 @@ static PyMappingMethods OOCLazyDict_mapping_methods = {
     .mp_ass_subscript = OOCLazyDict_insert
 };
 
+static PySequenceMethods OOCLazyDict_sequence_methods = {
+    .sq_length = OOCLazyDict_length,
+    .sq_contains = OOCLazyDict_contains
+};
+
 PyTypeObject OOCLazyDictType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     .tp_name = "oocmap.LazyDict",
     .tp_basicsize = sizeof(OOCLazyDictObject),
     .tp_itemsize = 0,
     .tp_dealloc = (destructor)OOCLazyDict_dealloc,
+    .tp_as_sequence = &OOCLazyDict_sequence_methods,
     .tp_as_mapping = &OOCLazyDict_mapping_methods,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_doc = "A dict-like class that's backed by an OOCMap",
