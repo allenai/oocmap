@@ -231,7 +231,19 @@ PyObject* OOCLazyDictObject_eager(OOCLazyDictObject* const self, OOCTransaction&
             found = cursor_get(cursor, &mdbKey, &mdbValue, MDB_NEXT);
             if(!found)
                 break;
-            if(mdbKey.mv_size != sizeof(DictItemKey)) throw OocError(OocError::UnexpectedData);
+
+            // We found the beginning of the next dict?
+            if(mdbKey.mv_size == sizeof(uint32_t)) {
+                if(*static_cast<uint32_t*>(mdbKey.mv_data) == self->dictId)
+                    throw OocError(OocError::UnexpectedData);
+                break;
+            }
+
+            // We found garbage?
+            if(mdbKey.mv_size != sizeof(DictItemKey))
+                throw OocError(OocError::UnexpectedData);
+
+            // We found an item!
             DictItemKey* const encodedItemKey = static_cast<DictItemKey* const>(mdbKey.mv_data);
             if(encodedItemKey->dictId != self->dictId)
                 break;
