@@ -271,7 +271,13 @@ static PyObject* OOCLazyDict_items(PyObject* const pySelf) {
         return nullptr;
     }
     OOCLazyDictObject* const self = reinterpret_cast<OOCLazyDictObject*>(pySelf);
-    return reinterpret_cast<PyObject*>(OOCLazyDictItems_fastnew(self));
+    try {
+        return reinterpret_cast<PyObject*>(OOCLazyDictItems_fastnew(self));
+    } catch (const OocError& e) {
+        e.pythonize();
+        return nullptr;
+    }
+}
 }
 
 static PyObject* OOCLazyDict_iter(PyObject* const pySelf) {
