@@ -56,6 +56,20 @@ OOCLazyDictItemsIterObject* OOCLazyDictItemsIter_fastnew(OOCLazyDictObject* dict
 
 
 //
+// OOCLazyDictKeys
+//
+
+typedef struct {
+    PyObject_HEAD
+    OOCLazyDictObject* dict;
+} OOCLazyDictKeysObject;
+
+extern PyTypeObject OOCLazyDictKeysType;
+
+OOCLazyDictKeysObject* OOCLazyDictKeys_fastnew(OOCLazyDictObject* dict);
+
+
+//
 // OOCLazyDictKeysIter
 //
 
@@ -66,7 +80,7 @@ typedef struct {
 
 extern PyTypeObject OOCLazyDictKeysIterType;
 
-OOCLazyDictKeysIterObject* OOCLazyDictKeysIter_fastnew(PyObject* itemsIter);
+OOCLazyDictKeysIterObject* OOCLazyDictKeysIter_fastnew(OOCLazyDictObject* dict);
 
 
 #endif

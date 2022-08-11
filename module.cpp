@@ -32,6 +32,8 @@ PyMODINIT_FUNC PyInit_oocmap() {
         return nullptr;
     if(PyType_Ready(&OOCLazyDictItemsIterType) < 0)
         return nullptr;
+    if(PyType_Ready(&OOCLazyDictKeysType) < 0)
+        return nullptr;
     if(PyType_Ready(&OOCLazyDictKeysIterType) < 0)
         return nullptr;
 
@@ -46,6 +48,7 @@ PyMODINIT_FUNC PyInit_oocmap() {
     Py_INCREF(&OOCLazyDictType);
     Py_INCREF(&OOCLazyDictItemsType);
     Py_INCREF(&OOCLazyDictItemsIterType);
+    Py_INCREF(&OOCLazyDictKeysType);
     Py_INCREF(&OOCLazyDictKeysIterType);
     if(
         PyModule_AddObject(m, "OOCMap", (PyObject*)&OOCMapType) < 0 ||
@@ -55,6 +58,7 @@ PyMODINIT_FUNC PyInit_oocmap() {
         PyModule_AddObject(m, "LazyDict", (PyObject*)&OOCLazyDictType) < 0 ||
         PyModule_AddObject(m, "LazyDictItems", (PyObject*)&OOCLazyDictItemsType) < 0 ||
         PyModule_AddObject(m, "LazyDictItemsIter", (PyObject*)&OOCLazyDictItemsIterType) < 0 ||
+        PyModule_AddObject(m, "LazyDictKeys", (PyObject*)&OOCLazyDictKeysType) < 0 ||
         PyModule_AddObject(m, "LazyDictKeysIter", (PyObject*)&OOCLazyDictKeysIterType) < 0
     ) {
         Py_DECREF(&OOCMapType);
@@ -64,6 +68,7 @@ PyMODINIT_FUNC PyInit_oocmap() {
         Py_DECREF(&OOCLazyDictType);
         Py_DECREF(&OOCLazyDictItemsType);
         Py_DECREF(&OOCLazyDictItemsIterType);
+        Py_DECREF(&OOCLazyDictKeysType);
         Py_DECREF(&OOCLazyDictKeysIterType);
         Py_DECREF(m);
         return nullptr;
