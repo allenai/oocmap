@@ -18,19 +18,19 @@ def count_ai2(o):
 import sys
 setname = sys.argv[1]
 
-if setname.startswith("big_"):
-  l = 10000
-elif setname.startswith("small_"):
-  l = 200000
-
 import timeit
 start = timeit.default_timer()
+
+l = 90000
 
 if setname.endswith(".ooc"):
   m = oocmap.OOCMap(setname)
   print(sum(count_ai2(m[i]) for i in tqdm.trange(l, desc="OOC")))
 elif setname.endswith(".jsonl"):
   print(sum(count_ai2(json.loads(j)) for j in tqdm.tqdm(itertools.islice(open(setname), l), desc="JSON", total=l)))
+elif setname.endswith(".json"):
+  with open(setname) as f:
+     print(sum(count_ai2(item) for item in tqdm.tqdm(json.load(f)[:l], desc="JSON")))
 elif setname.endswith(".sqlite"):
   from sqlitedict import SqliteDict
   with SqliteDict(setname) as d:
