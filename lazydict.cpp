@@ -92,7 +92,7 @@ static int OOCLazyDict_init(OOCLazyDictObject* const self, PyObject* const args,
     if(!parseSuccess)
         return -1;
 
-    // TODO: consider that __init__ might be called on an already initialized object
+    Py_CLEAR(self->ooc);
     self->ooc = reinterpret_cast<OOCMapObject*>(oocmapObject);
     Py_INCREF(oocmapObject);
 
@@ -112,7 +112,7 @@ static int OOCLazyDictItems_init(OOCLazyDictItemsObject* const self, PyObject* c
     if(!parseSuccess)
         return -1;
 
-    // TODO: consider that __init__ might be called on an already initialized object
+    Py_CLEAR(self->dict);
     self->dict = reinterpret_cast<OOCLazyDictObject*>(dictObject);
     Py_INCREF(dictObject);
 
@@ -132,7 +132,7 @@ static int OOCLazyDictItemsIter_init(OOCLazyDictItemsIterObject* const self, PyO
     if(!parseSuccess)
         return -1;
 
-    // TODO: consider that __init__ might be called on an already initialized object
+    Py_CLEAR(self->dict);
     self->dict = reinterpret_cast<OOCLazyDictObject*>(dictObject);
     Py_INCREF(dictObject);
     self->cursor = nullptr;
@@ -141,12 +141,12 @@ static int OOCLazyDictItemsIter_init(OOCLazyDictItemsIterObject* const self, PyO
 }
 
 static void OOCLazyDict_dealloc(OOCLazyDictObject* const self) {
-    Py_DECREF(self->ooc);
+    Py_XDECREF(self->ooc);
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
 static void OOCLazyDictItems_dealloc(OOCLazyDictItemsObject* const self) {
-    Py_DECREF(self->dict);
+    Py_XDECREF(self->dict);
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
