@@ -36,6 +36,10 @@ PyMODINIT_FUNC PyInit_oocmap() {
         return nullptr;
     if(PyType_Ready(&OOCLazyDictKeysIterType) < 0)
         return nullptr;
+    if(PyType_Ready(&OOCLazyDictValuesType) < 0)
+        return nullptr;
+    if(PyType_Ready(&OOCLazyDictValuesIterType) < 0)
+        return nullptr;
 
     PyObject* const m = PyModule_Create(&oocmap_module);
     if(m == nullptr)
@@ -50,6 +54,8 @@ PyMODINIT_FUNC PyInit_oocmap() {
     Py_INCREF(&OOCLazyDictItemsIterType);
     Py_INCREF(&OOCLazyDictKeysType);
     Py_INCREF(&OOCLazyDictKeysIterType);
+    Py_INCREF(&OOCLazyDictValuesType);
+    Py_INCREF(&OOCLazyDictValuesIterType);
     if(
         PyModule_AddObject(m, "OOCMap", (PyObject*)&OOCMapType) < 0 ||
         PyModule_AddObject(m, "LazyTuple", (PyObject*)&OOCLazyTupleType) < 0 ||
@@ -59,7 +65,9 @@ PyMODINIT_FUNC PyInit_oocmap() {
         PyModule_AddObject(m, "LazyDictItems", (PyObject*)&OOCLazyDictItemsType) < 0 ||
         PyModule_AddObject(m, "LazyDictItemsIter", (PyObject*)&OOCLazyDictItemsIterType) < 0 ||
         PyModule_AddObject(m, "LazyDictKeys", (PyObject*)&OOCLazyDictKeysType) < 0 ||
-        PyModule_AddObject(m, "LazyDictKeysIter", (PyObject*)&OOCLazyDictKeysIterType) < 0
+        PyModule_AddObject(m, "LazyDictKeysIter", (PyObject*)&OOCLazyDictKeysIterType) < 0 ||
+        PyModule_AddObject(m, "LazyDictValues", (PyObject*)&OOCLazyDictKeysType) < 0 ||
+        PyModule_AddObject(m, "LazyDictValuesIter", (PyObject*)&OOCLazyDictKeysIterType) < 0
     ) {
         Py_DECREF(&OOCMapType);
         Py_DECREF(&OOCLazyTupleType);
@@ -70,6 +78,8 @@ PyMODINIT_FUNC PyInit_oocmap() {
         Py_DECREF(&OOCLazyDictItemsIterType);
         Py_DECREF(&OOCLazyDictKeysType);
         Py_DECREF(&OOCLazyDictKeysIterType);
+        Py_DECREF(&OOCLazyDictValuesType);
+        Py_DECREF(&OOCLazyDictValuesIterType);
         Py_DECREF(m);
         return nullptr;
     }

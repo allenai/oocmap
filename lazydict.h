@@ -83,4 +83,32 @@ extern PyTypeObject OOCLazyDictKeysIterType;
 OOCLazyDictKeysIterObject* OOCLazyDictKeysIter_fastnew(OOCLazyDictObject* dict);
 
 
+//
+// OOCLazyDictValues
+//
+
+typedef struct {
+    PyObject_HEAD
+    OOCLazyDictObject* dict;
+} OOCLazyDictValuesObject;
+
+extern PyTypeObject OOCLazyDictValuesType;
+
+OOCLazyDictValuesObject* OOCLazyDictValues_fastnew(OOCLazyDictObject* dict);
+
+
+//
+// OOCLazyDictValuesIter
+//
+
+typedef struct {
+    PyObject_HEAD
+    PyObject* itemsIter;
+} OOCLazyDictValuesIterObject;
+
+extern PyTypeObject OOCLazyDictValuesIterType;
+
+OOCLazyDictValuesIterObject* OOCLazyDictValuesIter_fastnew(OOCLazyDictObject* dict);
+
+
 #endif
