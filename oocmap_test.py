@@ -301,7 +301,7 @@ def test_oocmap_dict():
                 lambda: d[key],
                 lambda: m[0][key])
 
-        # LazyDict,__setitem__()
+        # LazyDict.__setitem__()
         for key in [2, "three", [1,2,3], 1]:
             def assign_d():
                 d[key] = None
