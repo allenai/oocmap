@@ -206,10 +206,18 @@ static int OOCLazyDict_insert(PyObject* pySelf, PyObject* key, PyObject* value) 
     try {
         OOCTransaction txn(self->ooc, false);
 
-        DictItemKey encodedKey = {
-            .dictId = self->dictId,
-            .key = *OOCMap_encode(self->ooc, key, txn)
-        };
+        DictItemKey encodedKey = { .dictId = self->dictId };
+        try {
+            encodedKey.key = *OOCMap_encode(self->ooc, key, txn, true);
+        } catch(const OocError& error) {
+            switch(error.errorCode) {
+            case OocError::MutableValueNotAllowed:
+                PyErr_Format(PyExc_TypeError, "unhashable type: '%s'", Py_TYPE(key)->tp_name);
+                return -1;
+            default:
+                throw;
+            }
+        }
         const EncodedValue* const encodedValue = OOCMap_encode(self->ooc, key, txn);
 
         MDB_val mdbKey = { .mv_size = sizeof(encodedKey), .mv_data = &encodedKey };
@@ -238,10 +246,23 @@ static PyObject* OOCLazyDict_get(PyObject* const pySelf, PyObject* const key) {
     try {
         OOCTransaction txn(self->ooc, true);
 
-        DictItemKey encodedItemKey = {
-            .dictId = self->dictId,
-            .key = *OOCMap_encode(self->ooc, key, txn)
-        };
+        DictItemKey encodedItemKey = { .dictId = self->dictId };
+        try {
+            encodedItemKey.key = *OOCMap_encode(self->ooc, key, txn, true, true);
+        } catch(const OocError& error) {
+            switch(error.errorCode) {
+            case OocError::ImmutableValueNotFound:
+            case OocError::WriteNotAllowed:
+                PyErr_SetObject(PyExc_KeyError, key);
+                return nullptr;
+            case OocError::MutableValueNotAllowed:
+                PyErr_Format(PyExc_TypeError, "unhashable type: '%s'", Py_TYPE(key)->tp_name);
+                return nullptr;
+            default:
+                throw;
+            }
+        }
+
         MDB_val mdbKey = { .mv_size = sizeof(encodedItemKey), .mv_data = &encodedItemKey };
         MDB_val mdbValue;
         const bool found = get(txn.txn, self->ooc->dictsDb, &mdbKey, &mdbValue);

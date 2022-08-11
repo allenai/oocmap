@@ -39,6 +39,12 @@ void OocError::pythonize() const {
     case MdbError:
         PyErr_Format(PyExc_IOError, "Unknown problem with LMDB");
         break;
+    case MutableValueNotAllowed:
+        PyErr_Format(PyExc_ValueError, "Mutable values are not allowed here");
+        break;
+    case WriteNotAllowed:
+        PyErr_Format(PyExc_ValueError, "Not allowed to write now");
+        break;
     }
 }
 

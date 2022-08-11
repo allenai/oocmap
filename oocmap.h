@@ -115,7 +115,12 @@ private:
     void clear();
 };
 
-const EncodedValue* OOCMap_encode(OOCMapObject* self, PyObject* value, OOCTransaction& txn);
+const EncodedValue* OOCMap_encode(
+    OOCMapObject* self,
+    PyObject* value,
+    OOCTransaction& txn,
+    const bool failOnMutable = false,
+    const bool failOnWrite = false);
 PyObject* OOCMap_decode(OOCMapObject* self, EncodedValue* encodedValue, OOCTransaction& txn);
 
 

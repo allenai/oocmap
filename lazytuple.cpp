@@ -264,21 +264,18 @@ Py_ssize_t OOCLazyTupleObject_index(
     Id2EncodedMap insertedItemsInThisTransaction;
     const EncodedValue* encodedValue = nullptr;
     try {
-        const bool oldReadonly = txn.readonly;
-        txn.readonly = true;
-        encodedValue = OOCMap_encode(self->ooc, value, txn);
-        txn.readonly = oldReadonly;
-    } catch(const MdbError& e) {
-        if(e.mdbErrorCode != EACCES) throw;
-        // TODO: This does not really work, because it relies on txn really being readonly, whereas
-        // we might just be faking it.
-
-        // We tried to write the value in a readonly transaction, so we got the EACCES error. This must
-        // mean the value is a mutable value. The only thing we can do is search linearly through the list.
+        encodedValue = OOCMap_encode(self->ooc, value, txn, true, true);
     } catch(const OocError& e) {
-        if(e.errorCode != OocError::ImmutableValueNotFound) throw;
-        // Needle is immutable but not inserted into the map, so we know for sure we won't find it.
-        return -1;
+        switch(e.errorCode) {
+        case OocError::MutableValueNotAllowed:
+            // For mutable values, we have to search linearly through the list and compare them all.
+            break;
+        case OocError::ImmutableValueNotFound:
+            // The immutable value isn't in the map yet, so it can't possibly be in the tuple.
+            return -1;
+        default:
+            throw;
+        }
     }
 
     while(start < stop) {
@@ -325,21 +322,18 @@ Py_ssize_t OOCLazyTupleObject_count(OOCLazyTupleObject* self, OOCTransaction& tx
     Id2EncodedMap insertedItemsInThisTransaction;
     const EncodedValue* encodedValue = nullptr;
     try {
-        const bool oldReadonly = txn.readonly;
-        txn.readonly = true;
-        encodedValue = OOCMap_encode(self->ooc, value, txn);
-        txn.readonly = oldReadonly;
-    } catch(const MdbError& e) {
-        if(e.mdbErrorCode != EACCES) throw;
-        // TODO: This does not really work, because it relies on txn really being readonly, whereas
-        // we might just be faking it.
-
-        // We tried to write the value in a readonly transaction, so we got the EACCES error. This must
-        // mean the value is a mutable value. The only thing we can do is search linearly through the list.
+        encodedValue = OOCMap_encode(self->ooc, value, txn, true, true);
     } catch(const OocError& e) {
-        if(e.errorCode != OocError::ImmutableValueNotFound) throw;
-        // Needle is immutable but not inserted into the map, so we know for sure we won't find it.
-        return 0;
+        switch(e.errorCode) {
+        case OocError::MutableValueNotAllowed:
+            // For mutable values, we have to search linearly through the list and compare them all.
+            break;
+        case OocError::ImmutableValueNotFound:
+            // The immutable value isn't in the map yet, so it can't possibly be in the tuple.
+            return 0;
+        default:
+            throw;
+        }
     }
 
     MDB_val mdbKey = { .mv_size = sizeof(self->tupleId), .mv_data = &self->tupleId };

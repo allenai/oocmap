@@ -18,7 +18,9 @@ struct OocError : std::exception {
         UnknownHardcodedValue,
         UnexpectedData,
         IndexError,
-        MdbError
+        MdbError,
+        MutableValueNotAllowed,
+        WriteNotAllowed
     } errorCode;
 
     explicit OocError(const ErrorCode errorCode) : errorCode(errorCode) { }
