@@ -9,7 +9,7 @@ on:
     branches:
       - main
     paths:
-      - 'oocmap/**'
+      - '*.c *.cpp *.h'
 
 jobs:
   changelog:
