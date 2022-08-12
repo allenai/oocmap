@@ -59,13 +59,13 @@ void OOCTransaction::abort() {
 //
 
 // hardcoded values
-static const EncodedValue ENCODED_UNINITIALIZED = {.asUInt = 0, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0}; // This one has to be all zeros.
-static const EncodedValue ENCODED_NONE = {.asUInt = 1, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
-static const EncodedValue ENCODED_INT_ZERO = {.asUInt = 2, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
-static const EncodedValue ENCODED_TRUE = {.asUInt = 3, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
-static const EncodedValue ENCODED_FALSE = {.asUInt = 4, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
-static const EncodedValue ENCODED_EMPTY_TUPLE = {.asUInt = 5, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
-static const EncodedValue ENCODED_EMPTY_STRING = {.asUInt = 6, .typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0};
+static const EncodedValue ENCODED_UNINITIALIZED = {{ .asUInt = 0 }, {{.typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0}}}; // This one has to be all zeros.
+static const EncodedValue ENCODED_NONE = {{.asUInt = 1}, {{.typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0}}};
+static const EncodedValue ENCODED_INT_ZERO = {{.asUInt = 2}, {{.typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0}}};
+static const EncodedValue ENCODED_TRUE = {{.asUInt = 3}, {{.typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0}}};
+static const EncodedValue ENCODED_FALSE = {{.asUInt = 4}, {{.typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0}}};
+static const EncodedValue ENCODED_EMPTY_TUPLE = {{.asUInt = 5}, {{.typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0}}};
+static const EncodedValue ENCODED_EMPTY_STRING = {{.asUInt = 6}, {{.typeCode = TYPE_CODE_HARDCODED, .lengthMinusOne = 0}}};
 
 const EncodedValue* OOCMap_encode(
     OOCMapObject* const self,
