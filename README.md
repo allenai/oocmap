@@ -36,11 +36,8 @@ Values can be any Python type (see below for exceptions).
 Getting Started
 ---------------
 
-Until I figure out how to get this thing to PyPi, you have to install from source:
 ```
-git clone https://github.com/allenai/oocmap.git
-cd oocmap
-pip install -e .
+pip install oocmap
 ```
 
 Limitations
