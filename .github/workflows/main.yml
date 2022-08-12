@@ -48,6 +48,7 @@ jobs:
       - name: Install prerequisites
         run: |
           pip install --upgrade pip setuptools wheel virtualenv
+          pip install -r dev-requirements.txt
 
       - name: Install editable
         run: |
