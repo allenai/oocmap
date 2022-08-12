@@ -10,3 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of OOCMap
 - Added CI to the project
+
+
+## [v0.0]
+This version does not exist.
