@@ -3,6 +3,7 @@
 
 #include <unordered_map>
 #include <vector>
+#include <cassert>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
