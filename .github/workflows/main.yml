@@ -20,12 +20,12 @@ env:
 
 jobs:
   checks:
-    name: python ${{ matrix.python }} - ${{ matrix.task.name }}
+    name: ${{ matrix.os }} - python ${{ matrix.python }}
     timeout-minutes: 30
     strategy:
       matrix:
-        os: [ubuntu-22.04, ubuntu-20.04, macos-latest]
-        python: ['3.9']
+        os: [ubuntu-22.04, ubuntu-20.04, macos-latest, ubuntu-latest]
+        python: ['3.9', '3.10']
 
     runs-on: ${{ matrix.os }}
 
