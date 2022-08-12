@@ -102,4 +102,4 @@ jobs:
           body_path: ${{ github.workspace }}-RELEASE_NOTES.md
           prerelease: ${{ contains(env.TAG, 'rc') }}
           files: |
-            dist/*
+            dist/oocmap-${{ env.RELEASE_VERSION }}.tar.gz
