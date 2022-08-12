@@ -5,7 +5,7 @@ Prepares markdown release notes for GitHub releases.
 """
 
 import os
-from typing import List
+from typing import List, Optional
 
 import packaging.version
 
@@ -43,7 +43,7 @@ def get_change_log_notes() -> str:
     return "## What's new\n\n" + "".join(current_section_notes).strip() + "\n"
 
 
-def get_commit_history() -> str:
+def get_commit_history() -> Optional[str]:
     new_version = packaging.version.parse(TAG)
 
     # Get all tags sorted by version, latest first.
@@ -52,7 +52,7 @@ def get_commit_history() -> str:
     # Out of `all_tags`, find the latest previous version so that we can collect all
     # commits between that version and the new version we're about to publish.
     # Note that we ignore pre-releases unless the new version is also a pre-release.
-    last_tag: str
+    last_tag: Optional[str] = None
     for tag in all_tags:
         if not tag.strip():  # could be blank line
             continue
@@ -62,13 +62,18 @@ def get_commit_history() -> str:
         if version < new_version:
             last_tag = tag
             break
-    commits = os.popen(f"git log {last_tag}..{TAG}^ --oneline --first-parent").read()
-    return "## Commits\n\n" + commits
+    if last_tag is None:
+        return None
+    else:
+        commits = os.popen(f"git log {last_tag}..{TAG}^ --oneline --first-parent").read()
+        return "## Commits\n\n" + commits
 
 
 def main():
     print(get_change_log_notes())
-    print(get_commit_history())
+    commit_history = get_commit_history()
+    if commit_history is not None:
+        print(commit_history)
 
 
 if __name__ == "__main__":
