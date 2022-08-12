@@ -30,6 +30,10 @@ setup(name='oocmap',
     project_urls={
       'Source': 'http://github.com/allenai/oocmap'
     },
-    classifiers=["License :: OSI Approved :: Apache Software License"],
+    classifiers=[
+        "License :: OSI Approved :: Apache Software License",
+        "Intended Audience :: Developers",
+        "Programming Language :: Python"
+    ],
     url='http://github.com/allenai/oocmap',
     ext_modules=[oocmap_module])
