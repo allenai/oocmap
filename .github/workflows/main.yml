@@ -21,21 +21,13 @@ env:
 jobs:
   checks:
     name: python ${{ matrix.python }} - ${{ matrix.task.name }}
-    runs-on: [ubuntu-22.04, ubuntu-20.04, macos-latest]
     timeout-minutes: 30
     strategy:
-      fail-fast: false
       matrix:
+        os: [ubuntu-22.04, ubuntu-20.04, macos-latest]
         python: ['3.9']
-        task:
-          - name: Build
-            run: |
-              python setup.py check
-              python setup.py bdist_wheel sdist
 
-          - name: Test
-            run: |
-              pytest -v --color=yes .
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v3
@@ -50,22 +42,26 @@ jobs:
           pip install --upgrade pip setuptools wheel virtualenv
           pip install -r dev-requirements.txt
 
-      - name: Install editable
-        run: |
-          pip install -e .
-
       - name: Show environment info
         run: |
           which python
           python --version
           pip freeze
 
-      - name: ${{ matrix.task.name }}
+      - name: Build
         run: |
-          ${{ matrix.task.run }}
+          python setup.py check
+          python setup.py bdist_wheel sdist
+
+      - name: Install editable
+        run: |
+          pip install -e .
+
+      - name: Test
+        run: |
+          pytest -v --color=yes .
 
       - name: Upload package distribution files
-        if: matrix.task.name == 'Build'
         uses: actions/upload-artifact@v3
         with:
           name: package
