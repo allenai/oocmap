@@ -1,5 +1,8 @@
 from distutils.core import setup, Extension
 
+# The next line is touched automatically by the release process.
+VERSION = '0.1'
+
 oocmap_module = Extension(
     'oocmap',
     sources=[
@@ -18,7 +21,7 @@ oocmap_module = Extension(
 )
 
 setup(name='oocmap',
-    version='0.1',
+    version=VERSION,
     description='The out-of-core map',
     author='Dirk Groeneveld',
     author_email='dirkg@allenai.org',
