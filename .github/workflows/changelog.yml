@@ -9,7 +9,7 @@ on:
     branches:
       - master
     paths:
-      - '*.c *.cpp *.h'
+      - '*.{c,cpp,h}'
 
 jobs:
   changelog:
