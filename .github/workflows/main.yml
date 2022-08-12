@@ -51,7 +51,7 @@ jobs:
       - name: Build
         run: |
           python setup.py check
-          python setup.py bdist_wheel sdist
+          python setup.py bdist_wheel
 
       - name: Install editable
         run: |
