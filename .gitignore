@@ -4,3 +4,5 @@
 /cmake-build-release/
 /cmake-build-debug-gcc/
 __pycache__/
+/*.egg-info/
+/*.so

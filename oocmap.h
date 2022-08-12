@@ -4,6 +4,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include <cassert>
+#define STATIC_ASSERT(test_for_true) \
+    static_assert((test_for_true), "(" #test_for_true ") failed")
+
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include "lmdb.h"
@@ -67,7 +71,7 @@ struct EncodedValue {
         return asUInt != other.asUInt || typeCodeWithLength != other.typeCodeWithLength;
     }
 };
-_Static_assert(sizeof(EncodedValue) == 9, "EncodedValue must be 9 bytes in size.");
+STATIC_ASSERT(sizeof(EncodedValue) == 9);
 
 // This is the structure that defines the keys in the dicts table. Dicts are different
 // because the keys are not integers but variable-length.
