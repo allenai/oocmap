@@ -1,1 +1,9 @@
 pytest
+
+# Needed for packaging and uploading to PyPi
+twine>=1.11.0
+setuptools
+wheel
+
+# For working with version numbers.
+packaging
