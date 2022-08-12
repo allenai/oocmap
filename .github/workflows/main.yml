@@ -12,7 +12,7 @@ on:
     branches:
       - master
     tags:
-      - 'v*.*.*'
+      - 'v*.*'
 
 env:
   PYTHON_PATH: ./
