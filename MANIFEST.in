@@ -1,0 +1,1 @@
+include LICENSE *.c *.h *.cpp
