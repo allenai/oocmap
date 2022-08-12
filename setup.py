@@ -1,7 +1,7 @@
 from distutils.core import setup, Extension
 
 # The next line is touched automatically by the release process.
-VERSION = '0.2'
+VERSION = '0.3'
 
 oocmap_module = Extension(
     'oocmap',
