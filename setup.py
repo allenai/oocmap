@@ -24,12 +24,12 @@ setup(name='oocmap',
     version=VERSION,
     description='A file-backed dictionary for Python',
     long_description=open("README.md").read(),
-    long_description_content_type="text/text",
+    long_description_content_type="text/markdown",
     author='Dirk Groeneveld',
     author_email='dirkg@allenai.org',
-    license="Apache License 2.0",
     project_urls={
       'Source': 'http://github.com/allenai/oocmap'
     },
+    classifiers=["License :: OSI Approved :: Apache Software License"],
     url='http://github.com/allenai/oocmap',
     ext_modules=[oocmap_module])
