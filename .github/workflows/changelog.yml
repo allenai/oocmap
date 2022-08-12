@@ -8,8 +8,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - '*.c *.cpp *.h'
 
 jobs:
   changelog:
