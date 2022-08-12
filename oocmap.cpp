@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <random>
+#include <chrono>
 #include "spooky.h"
 
 #include "errors.h"
