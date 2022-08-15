@@ -1,1 +1,1 @@
-include LICENSE *.c *.h *.cpp
+include LICENSE LMDB-LICENSE.txt *.c *.h *.cpp
